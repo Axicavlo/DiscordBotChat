@@ -2,6 +2,7 @@
 import asyncio
 import ctypes
 import os
+import sys
 from pathlib import Path
 import queue
 import threading
@@ -12,7 +13,9 @@ from tkinter import font as tkfont
 import discord
 
 
-TOKEN_FILE = Path(__file__).resolve().with_name('.bot-token.dat')
+TOKEN_FILE = (Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'DiscordChatBot' / '.bot-token.dat'
+              if getattr(sys, 'frozen', False)
+              else Path(__file__).resolve().with_name('.bot-token.dat'))
 
 
 def bind_canvas_pointer(canvas, tag_prefix):
@@ -55,6 +58,7 @@ def load_token():
 
 def save_token(token):
     encrypted = protect_token(token.encode('utf-8'))
+    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
     temporary = TOKEN_FILE.with_suffix('.tmp')
     try:
         temporary.write_bytes(encrypted)

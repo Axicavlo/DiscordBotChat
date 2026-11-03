@@ -14,6 +14,18 @@ Discord 앱이나 웹을 열지 않고 사용하는 Windows용 기본 데스크�
 
 ## 실행
 
+### EXE 실행
+
+`dist\ChatBot.exe`를 더블클릭합니다. Python 설치나 배치파일 실행은 필요 없습니다.
+EXE 첫 실행 시 봇 토큰을 입력하세요. EXE의 토큰은 Windows 사용자 계정으로 암호화하여
+`%LOCALAPPDATA%\DiscordChatBot\.bot-token.dat`에 저장됩니다. 기존 Python 실행의 토큰 파일은 유지됩니다.
+저장 정보를 지우려면 앱 종료 후 해당 파일을 삭제하세요.
+
+EXE를 다시 만들려면 `setup.bat`으로 개발 환경을 준비한 뒤 `build_exe.bat`을 실행합니다.
+이미지와 실행 라이브러리는 EXE에 포함되며, 토큰 파일은 포함하지 않습니다.
+
+### Python 실행
+
 1. 최초 한 번 `setup.bat`을 실행해 가상 환경과 discord.py를 설치합니다.
 2. `start.bat`을 실행합니다. 별도 콘솔 창 없이 기본 창이 열립니다.
 3. 봇 토큰을 입력하고 연결합니다. 연결에 성공한 마지막 토큰은 Windows 사용자 계정으로 암호화하여 `.bot-token.dat`에 저장하고, 다음 실행 때 자동으로 채웁니다. 연결 시 입력란은 지워집니다. 저장 정보를 지우려면 프로그램을 종료한 후 `.bot-token.dat`를 삭제하세요.
