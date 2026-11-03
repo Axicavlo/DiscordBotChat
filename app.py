@@ -621,7 +621,7 @@ class App:
     def __init__(self, root):
         self.root = root
         root.option_add('*Button.cursor', 'hand2')
-        root.title('채널 메모')
+        root.title('채팅봇')
         root.geometry('1100x780')
         root.minsize(900, 600)
         root.protocol('WM_DELETE_WINDOW', self.close)
@@ -687,7 +687,7 @@ class App:
             Chat.rounded(auth_card, 0, 0, 460, height, 'white', radius=22, tags='background')
             auth_card.tag_lower('background')
         card.bind('<Configure>', size_card)
-        tk.Label(card, text='채널 메모', bg='white', fg='#00a6bd', font=('맑은 고딕', 24, 'bold')).pack(anchor='w')
+        tk.Label(card, text='채팅봇', bg='white', fg='#00a6bd', font=('맑은 고딕', 24, 'bold')).pack(anchor='w')
         tk.Label(card, text='봇 계정으로 대화를 시작하세요.', bg='white', fg='#7c8995', font=('맑은 고딕', 11)).pack(anchor='w', pady=(8, 28))
         tk.Label(card, text='봇 토큰', bg='white', fg='#344f60', font=('맑은 고딕', 10, 'bold')).pack(anchor='w')
         self.token = tk.Entry(card, show='*', font=('맑은 고딕', 12), bg='#f4f7f9', relief='flat', highlightthickness=1, highlightbackground='#dce5eb', highlightcolor='#00a6bd')
