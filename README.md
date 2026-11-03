@@ -4,33 +4,62 @@ Discord 앱이나 웹을 열지 않고 사용하는 Windows용 기본 데스크�
 토큰 로그인 → 서버 선택 → 카테고리별 채널 선택 순서로 사용합니다. 모든 대화는 같은 창에서 전환됩니다.
 모든 메시지는 **봇 계정**으로 전송됩니다. 개인 계정 및 개인 DM은 지원하지 않습니다.
 
-## 준비
+## Discord 봇 준비
 
-1. Python 3.11 이상을 설치합니다(Tkinter 포함).
-2. https://discord.com/developers/applications 에서 애플리케이션을 생성하고 Bot 화면에서 봇 토큰을 발급합니다.
-3. Bot → Privileged Gateway Intents → **Message Content Intent**를 켭니다.
-4. Installation 또는 OAuth2 URL Generator에서 `bot` 범위로 서버에 초대합니다.
-5. 필요한 채널에만 **View Channels / Read Message History / Send Messages** 권한을 부여합니다. 관리자 권한은 필요하지 않습니다.
+1. [Discord Developer Portal](https://discord.com/developers/applications)에서 애플리케이션을 생성하고 Bot 화면에서 봇 토큰을 발급합니다.
+2. Bot → Privileged Gateway Intents → **Message Content Intent**를 켭니다.
+3. Installation 또는 OAuth2 URL Generator에서 `bot` 범위로 서버에 초대합니다.
+4. 필요한 채널에만 **View Channels / Read Message History / Send Messages** 권한을 부여합니다. 관리자 권한은 필요하지 않습니다.
 
 ## 실행
 
 ### EXE 실행
 
-`dist\ChatBot.exe`를 더블클릭합니다. Python 설치나 배치파일 실행은 필요 없습니다.
-EXE 첫 실행 시 봇 토큰을 입력하세요. EXE의 토큰은 Windows 사용자 계정으로 암호화하여
-`%LOCALAPPDATA%\DiscordChatBot\.bot-token.dat`에 저장됩니다. 기존 Python 실행의 토큰 파일은 유지됩니다.
-저장 정보를 지우려면 앱 종료 후 해당 파일을 삭제하세요.
+1. 빌드된 `ChatBot.exe`를 더블클릭합니다. 이 프로젝트에서 빌드한 파일은 `dist\ChatBot.exe`에 있습니다.
+2. 첫 실행 시 봇 토큰을 입력하고 **연결하기**를 누릅니다.
+3. 연결 후 서버와 채널을 선택해 대화합니다.
 
-EXE를 다시 만들려면 `setup.bat`으로 개발 환경을 준비한 뒤 `build_exe.bat`을 실행합니다.
-이미지와 실행 라이브러리는 EXE에 포함되며, 토큰 파일은 포함하지 않습니다.
+Python 설치나 배치파일 실행은 필요 없습니다. 이미지와 실행 라이브러리가 포함되어 있어 EXE 파일만 옮겨 실행할 수 있습니다.
+EXE는 Git에 포함하지 않으므로 소스만 내려받은 경우 아래 **EXE 빌드** 과정을 먼저 진행하세요.
 
 ### Python 실행
 
+Python 3.11 이상(Tkinter 포함)이 필요합니다.
+
 1. 최초 한 번 `setup.bat`을 실행해 가상 환경과 discord.py를 설치합니다.
 2. `start.bat`을 실행합니다. 별도 콘솔 창 없이 기본 창이 열립니다.
-3. 봇 토큰을 입력하고 연결합니다. 연결에 성공한 마지막 토큰은 Windows 사용자 계정으로 암호화하여 `.bot-token.dat`에 저장하고, 다음 실행 때 자동으로 채웁니다. 연결 시 입력란은 지워집니다. 저장 정보를 지우려면 프로그램을 종료한 후 `.bot-token.dat`를 삭제하세요.
-4. 맨 왼쪽 서버 아이콘 목록에서 서버를 한 번 클릭하고, 옆에 표시되는 카테고리별 채널 목록에서 채널을 선택합니다. 오른쪽 대화 화면이 해당 채널로 전환되며 채널별 초안과 답장 대상은 유지됩니다. 채널 목록 우상단의 왼쪽 화살표로 목록을 접고, 접힌 위치의 오른쪽 화살표로 펼칩니다. 맨 위 집 모양 홈 아이콘에서 토큰을 변경해 다른 봇으로 연결할 수 있습니다. 봇 변경 시 기존 대화와 초안은 초기화됩니다.
-5. 메시지는 전송 버튼 또는 Enter로 보냅니다. Shift+Enter 또는 Alt+Enter는 줄바꿈입니다.
+3. 봇 토큰을 입력하고 연결합니다.
+
+### EXE 빌드
+
+Windows에서 Python 3.11 이상(Tkinter 포함)을 설치한 뒤 진행합니다. 최초 환경 구성과 빌드 도구 설치에는 인터넷 연결이 필요합니다.
+
+1. 최초 한 번 `setup.bat`을 실행합니다.
+2. `build_exe.bat`을 실행합니다.
+3. 빌드 완료 후 `dist\ChatBot.exe`를 실행합니다.
+
+빌드 스크립트는 `requirements-build.txt`에 지정한 PyInstaller를 설치하고 콘솔 창 없는 단일 EXE를 생성합니다.
+코드를 수정했다면 EXE를 종료한 뒤 다시 빌드하세요. 토큰 파일은 빌드에 포함하지 않습니다.
+
+## 사용 방법
+
+- 맨 왼쪽 서버 아이콘을 클릭하고, 카테고리별 채널 목록에서 채널을 선택합니다.
+- 같은 창에서 대화를 전환하며 채널별 초안과 답장 대상은 유지됩니다.
+- 채널 목록 우상단의 왼쪽 화살표로 목록을 접고, 접힌 위치의 오른쪽 화살표로 펼칩니다.
+- 맨 위 홈 아이콘에서 토큰을 변경해 다른 봇으로 연결할 수 있습니다. 봇 변경 시 기존 대화와 초안은 초기화됩니다.
+- 메시지는 전송 버튼 또는 Enter로 보냅니다. Shift+Enter 또는 Alt+Enter는 줄바꿈입니다.
+
+## 토큰 저장
+
+연결에 성공한 마지막 토큰은 Windows 사용자 계정으로 암호화해 저장하고 다음 실행 때 자동으로 채웁니다. 연결 시 입력란은 지워집니다.
+
+| 실행 방식 | 저장 위치 |
+| --- | --- |
+| EXE | `%LOCALAPPDATA%\DiscordChatBot\.bot-token.dat` |
+| Python | `app.py`와 같은 폴더의 `.bot-token.dat` |
+
+두 실행 방식은 토큰 파일을 따로 사용하므로 Python에서 EXE로 전환할 때 토큰을 한 번 입력해야 합니다.
+저장 정보를 지우려면 프로그램을 종료한 후 해당 파일을 삭제하세요.
 
 토큰은 다른 사람에게 공유하거나 채팅에 붙여넣지 마세요. 선택적으로 `DISCORD_BOT_TOKEN` 환경 변수도 사용할 수 있습니다.
 프로그램을 종료하면 봇 연결도 종료됩니다. 인터넷 연결은 필요합니다.
@@ -46,4 +75,4 @@ EXE를 다시 만들려면 `setup.bat`으로 개발 환경을 준비한 뒤 `bui
 
 문제 확인용 실행: `.venv\Scripts\python.exe app.py`
 
-공식 참고: https://discordpy.readthedocs.io/en/stable/intents.html
+공식 참고: [discord.py Intents 안내](https://discordpy.readthedocs.io/en/stable/intents.html)
