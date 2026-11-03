@@ -4,6 +4,9 @@ __pycache__/
 .env
 .bot-token.dat
 .bot-token.tmp
+/build/
+/dist/
+/*.spec
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
