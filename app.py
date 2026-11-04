@@ -5,12 +5,17 @@ import os
 import sys
 from pathlib import Path
 import queue
+import re
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 from tkinter import font as tkfont
 
 import discord
+
+from chatbot_core import Bridge, message_text, safe_error, server_display_name, VERSION
+if os.name == 'nt':
+    from windows_ime import attach_preview
 
 
 TOKEN_FILE = (Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'DiscordChatBot' / '.bot-token.dat'
@@ -89,250 +94,44 @@ def complete_ime(widget):
             ime.ImmReleaseContext(hwnd, context)
 
 
-class InlineIme:
-    """Draw live Windows IME composition using the Text widget's own style."""
-    def __init__(self, widget):
-        self.widget = widget
-        self.active = False
-        self.hwnd = widget.winfo_toplevel().winfo_id()
-        self.ime = ctypes.WinDLL('imm32')
-        self.ime.ImmGetContext.argtypes = [ctypes.c_void_p]
-        self.ime.ImmGetContext.restype = ctypes.c_void_p
-        self.ime.ImmReleaseContext.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-        self.ime.ImmReleaseContext.restype = ctypes.c_int
-        self.ime.ImmGetCompositionStringW.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
-                                                    ctypes.c_void_p, ctypes.c_ulong]
-        self.ime.ImmGetCompositionStringW.restype = ctypes.c_long
-        self.native = ctypes.WinDLL('comctl32', use_last_error=True)
-        callback_type = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_void_p,
-                                          ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t,
-                                          ctypes.c_size_t, ctypes.c_size_t)
-        self.callback = callback_type(self.on_message)
-        self.subclass_id = id(self)
-        self.native.SetWindowSubclass.argtypes = [ctypes.c_void_p, callback_type,
-                                                  ctypes.c_size_t, ctypes.c_size_t]
-        self.native.SetWindowSubclass.restype = ctypes.c_int
-        self.native.RemoveWindowSubclass.argtypes = [ctypes.c_void_p, callback_type, ctypes.c_size_t]
-        self.native.RemoveWindowSubclass.restype = ctypes.c_int
-        self.native.DefSubclassProc.argtypes = [ctypes.c_void_p, ctypes.c_uint,
-                                                ctypes.c_size_t, ctypes.c_ssize_t]
-        self.native.DefSubclassProc.restype = ctypes.c_ssize_t
-        if not self.native.SetWindowSubclass(self.hwnd, self.callback, self.subclass_id, 0):
-            raise ctypes.WinError(ctypes.get_last_error())
-
-    def detach(self):
-        self.native.RemoveWindowSubclass(self.hwnd, self.callback, self.subclass_id)
-
-    def read_string(self, context, flag):
-        size = self.ime.ImmGetCompositionStringW(context, flag, None, 0)
-        if size < 0:
-            raise OSError('IME composition could not be read')
-        if not size:
-            return ''
-        buffer = ctypes.create_string_buffer(size)
-        read = self.ime.ImmGetCompositionStringW(context, flag, buffer, size)
-        if read < 0:
-            raise OSError('IME composition could not be read')
-        return buffer.raw[:read].decode('utf-16-le')
-
-    def replace(self, value, final=False):
-        text = self.widget
-        if not self.active:
-            if not value:
-                return
-            if text.tag_ranges('sel'):
-                text.mark_set('insert', 'sel.first')
-                text.delete('sel.first', 'sel.last')
-            text.mark_set('_ime_start', 'insert')
-            text.mark_gravity('_ime_start', 'left')
-            text.mark_set('_ime_end', 'insert')
-            text.mark_gravity('_ime_end', 'right')
-            self.active = True
-        text.delete('_ime_start', '_ime_end')
-        text.insert('_ime_start', value, ())
-        text.mark_set('insert', '_ime_end')
-        text.see('insert')
-        if final:
-            text.mark_unset('_ime_start', '_ime_end')
-            self.active = False
-
-    def on_message(self, hwnd, message, wparam, lparam, subclass_id, data):
-        try:
-            if message == 0x0082:  # WM_NCDESTROY: detach before HWND is destroyed.
-                self.native.RemoveWindowSubclass(hwnd, self.callback, subclass_id)
-            elif message == 0x0281:  # WM_IME_SETCONTEXT: hide native composition UI.
-                lparam &= ~0x80000000
-            elif message in (0x010D, 0x010E, 0x010F) and not (
-                    self.active or self.widget.focus_get() == self.widget):
-                return self.native.DefSubclassProc(hwnd, message, wparam, lparam)
-            elif message == 0x010D:  # WM_IME_STARTCOMPOSITION
-                return 0
-            elif message == 0x010E:  # WM_IME_ENDCOMPOSITION (including cancellation)
-                self.replace('', final=True)
-                return 0
-            elif message == 0x010F:  # WM_IME_COMPOSITION
-                context = self.ime.ImmGetContext(hwnd)
-                if context:
-                    try:
-                        if lparam & 0x0800:  # GCS_RESULTSTR
-                            self.replace(self.read_string(context, 0x0800), final=True)
-                        if lparam & 0x0008:  # GCS_COMPSTR
-                            self.replace(self.read_string(context, 0x0008))
-                        if not lparam:
-                            self.replace('', final=True)
-                    finally:
-                        self.ime.ImmReleaseContext(hwnd, context)
-                    return 0  # Do not let Tk insert the result a second time.
-        except (OSError, UnicodeError, tk.TclError):
-            # Keep native input functional if the input method rejects a request.
-            self.replace('', final=True)
-        return self.native.DefSubclassProc(hwnd, message, wparam, lparam)
-
-
-def message_text(message):
-    body = message.clean_content
-    if message.reference:
-        original = message.reference.resolved
-        if isinstance(original, discord.Message):
-            preview = original.clean_content.replace('\n', ' ')[:80] or '[첨부 메시지]'
-            body = f'↳ {original.author.display_name}: {preview}\n{body}'
-        else:
-            body = f'↳ 원본 메시지 (ID: {message.reference.message_id})\n{body}'
-    extras = [a.url for a in message.attachments]
-    extras += [e.title or e.description or '[임베드]' for e in message.embeds]
-    if extras:
-        body += '\n' + '\n'.join(extras)
-    return f'{message.created_at.astimezone():%m/%d %H:%M}  {message.author.display_name}\n{body or "[내용 없음]"}\n'
-
-
-class Bridge(discord.Client):
-    def __init__(self, events):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
-        self.events = events
-        self.worker_loop = None
-
-    async def on_ready(self):
-        self.events.put(('ready', None, str(self.user)))
-        await self.publish_servers()
-
-    async def on_disconnect(self):
-        self.events.put(('status', None, '연결 끊김 · 재연결 대기 중'))
-
-    async def publish_servers(self):
-        self.events.put(('servers', None, sorted([(g.id, g.name) for g in self.guilds], key=lambda x: x[1])))
-
-    async def on_guild_join(self, guild):
-        await self.publish_servers()
-
-    async def on_guild_remove(self, guild):
-        await self.publish_servers()
-
-    async def channels(self, guild_id):
-        guild = self.get_guild(guild_id)
-        if guild is None or guild.me is None:
-            raise RuntimeError('서버 정보를 가져올 수 없습니다. 새로고침하세요.')
-        rows = [(c.id, f'{c.category.name + " / " if c.category else ""}#{c.name}')
-                for c in guild.text_channels if c.permissions_for(guild.me).view_channel]
-        self.events.put(('channels', guild_id, rows))
-
-    async def history(self, channel_id):
-        channel = self.get_channel(channel_id)
-        if channel is None:
-            raise RuntimeError('채널에 접근할 수 없습니다.')
-        rows = [m async for m in channel.history(limit=100)]
-        self.events.put(('history', channel_id, list(reversed(rows))))
-
-    async def send_text(self, channel_id, text, reply_id=None, notify_reply=False):
-        channel = self.get_channel(channel_id)
-        if channel is None:
-            raise RuntimeError('채널에 접근할 수 없습니다.')
-        reference = None
-        if reply_id is not None:
-            reference = discord.MessageReference(message_id=reply_id, channel_id=channel_id,
-                                                 fail_if_not_exists=True)
-        await channel.send(text, reference=reference,
-                           allowed_mentions=discord.AllowedMentions(
-                               users=True, roles=False, everyone=False, replied_user=notify_reply))
-        self.events.put(('sent', channel_id, (text, reply_id)))
-
-    async def on_message(self, message):
-        if message.guild:
-            self.events.put(('message', message.channel.id, message))
-
-    async def on_raw_message_edit(self, payload):
-        try:
-            channel = self.get_channel(payload.channel_id)
-            if channel:
-                msg = await channel.fetch_message(payload.message_id)
-                self.events.put(('message', payload.channel_id, msg))
-        except discord.HTTPException:
-            pass
-
-    async def on_raw_message_delete(self, payload):
-        self.events.put(('deleted', payload.channel_id, payload.message_id))
-
-    async def on_raw_bulk_message_delete(self, payload):
-        for mid in payload.message_ids:
-            self.events.put(('deleted', payload.channel_id, mid))
-
-    def run_worker(self, token):
-        async def main():
-            self.worker_loop = asyncio.get_running_loop()
-            try:
-                async with self:
-                    await self.start(token)
-            except Exception as exc:
-                self.events.put(('fatal', None, safe_error(exc)))
-        asyncio.run(main())
-
-    def submit(self, method, *args, channel_id=None):
-        if not self.worker_loop or not self.is_ready():
-            self.events.put(('error', channel_id, '봇 연결이 준비되지 않았습니다.'))
-            return
-        async def task():
-            try:
-                await method(*args)
-            except Exception as exc:
-                self.events.put(('error', channel_id, safe_error(exc)))
-        asyncio.run_coroutine_threadsafe(task(), self.worker_loop)
-
-
-def safe_error(exc):
-    if isinstance(exc, discord.LoginFailure):
-        return '봇 토큰이 올바르지 않습니다.'
-    if isinstance(exc, discord.PrivilegedIntentsRequired):
-        return 'Developer Portal에서 Message Content Intent를 켜주세요.'
-    if isinstance(exc, discord.Forbidden):
-        return '권한이 없습니다. 채널 보기·메시지 기록 보기·메시지 보내기를 확인하세요.'
-    if isinstance(exc, discord.HTTPException):
-        return f'Discord 요청 실패 (HTTP {exc.status}). 잠시 후 다시 시도하세요.'
-    if isinstance(exc, RuntimeError):
-        return str(exc)
-    return f'연결 또는 처리 실패 ({type(exc).__name__}). 네트워크를 확인하세요.'
-
-
 class Chat:
     def __init__(self, app, channel_id, title):
         self.app, self.channel_id = app, channel_id
         self.messages = {}
         self.deleted = set()
         self.reply_id = None
-        self.mention_window = None
+        self.mention_rows = []
+        self.mention_range = None
+        self.mention_dismissed = None
         self.bg = '#e9eef3'
         self.resize_job = None
         self.send_job = None
+        self.mention_job = None
+        self.message_menu_frame = None
+        self.message_menu_bindings = []
+        self.message_text_items = {}
+        self.selection_mid = None
+        self.selection_body = ''
+        self.selection_anchor = None
+        self.selection_start = None
+        self.selection_end = None
+        self.selection_dragging = False
         self.window = tk.Frame(app.chat_host, bg=self.bg)
         header = tk.Frame(self.window, bg=self.bg)
         header.pack(fill='x', padx=22, pady=(20, 12))
         tk.Label(header, text='#', bg='#d5e1e9', fg='#40596a', font=('맑은 고딕', 18, 'bold'), width=2).pack(side='left')
         tk.Label(header, text='#chat', bg=self.bg, fg='#233747', font=('맑은 고딕', 11, 'bold')).pack(side='left', padx=12)
         self.view = tk.Canvas(self.window, bg=self.bg, highlightthickness=0)
+        self.view.configure(selectbackground='#bcecf2', selectforeground='#243746', selectborderwidth=0)
         self.view.pack(fill='both', expand=True, padx=8)
-        bind_canvas_pointer(self.view, 'message_')
         self.view.bind('<Configure>', self.schedule_render)
         self.view.bind('<MouseWheel>', lambda event: self.view.yview_scroll(-int(event.delta / 120), 'units'))
+        self.view.bind('<Button-1>', self.start_message_selection)
+        self.view.bind('<B1-Motion>', self.drag_message_selection)
+        self.view.bind('<ButtonRelease-1>', self.finish_message_selection)
+        self.view.bind('<Control-c>', self.copy_selection)
+        self.view.bind('<Control-C>', self.copy_selection)
+        self.view.bind('<Escape>', self.clear_message_selection)
         self.status = tk.StringVar(value='최근 대화 불러오는 중…')
         tk.Label(self.window, textvariable=self.status, bg=self.bg, fg='#7c8995', font=('맑은 고딕', 9), anchor='w', wraplength=550).pack(fill='x', padx=22, pady=(4, 6))
         self.composer = tk.Canvas(self.window, bg=self.bg, height=150, highlightthickness=0)
@@ -343,19 +142,37 @@ class Chat:
         self.reply_frame = tk.Frame(self.input_frame, bg='white')
         self.reply_label = tk.Label(self.reply_frame, bg='white', fg='#52717d', anchor='w', justify='left', wraplength=360)
         self.reply_label.pack(side='left', fill='x', expand=True)
-        ttk.Button(self.reply_frame, text='취소', command=self.clear_reply, cursor='hand2').pack(side='right')
-        self.notify_reply = tk.BooleanVar(value=False)
-        tk.Checkbutton(self.reply_frame, text='알림', variable=self.notify_reply, bg='white', activebackground='white', fg='#7c8995', cursor='hand2').pack(side='right')
+        tk.Button(self.reply_frame, text='×', command=self.clear_reply, cursor='hand2',
+                  width=2, padx=0, pady=0, font=('맑은 고딕', 13),
+                  bg='white', activebackground='white', fg='#52717d', activeforeground='#008fa5',
+                  relief='flat', bd=0, highlightthickness=0).pack(side='right')
         self.input = tk.Text(self.input_frame, height=3, wrap='word', font=('맑은 고딕', 11), relief='flat', bd=0, highlightthickness=0, bg='white', fg='#243746', insertbackground='#00a5bc')
         self.input.pack(fill='x', pady=(8, 6))
-        self.inline_ime = InlineIme(self.input) if os.name == 'nt' else None
+        self.ime_preview = attach_preview(self.input) if os.name == 'nt' else None
         self.input.bind('<Return>', self.send)
         self.input.bind('<Shift-Return>', self.insert_linebreak)
         self.input.bind('<Alt-Return>', self.insert_linebreak)
         self.input.bind('<KeyRelease>', self.input_key)
+        self.input.bind('<ButtonRelease-1>', self.input_key)
+        self.input.bind('<Up>', lambda event: self.move_mention(-1))
+        self.input.bind('<Down>', lambda event: self.move_mention(1))
+        self.input.bind('<Escape>', self.dismiss_mention)
+        self.input.bind('<FocusOut>', lambda event: self.hide_mentions())
+        self.input.bind('<<Modified>>', self.input_modified)
+        self.input.edit_modified(False)
+        self.mention_frame = tk.Frame(self.window, bg='white', highlightthickness=1,
+                                      highlightbackground='#dce5eb', padx=8, pady=6)
+        tk.Label(self.mention_frame, text='멘션할 사용자', anchor='w', bg='white',
+                 fg='#718493', font=('맑은 고딕', 9)).pack(fill='x', pady=(2, 6))
+        self.mention_list = tk.Listbox(self.mention_frame, exportselection=False, takefocus=False,
+                                      height=4, font=('맑은 고딕', 11), bd=0, bg='white', fg='#314b5c',
+                                      highlightthickness=0, selectborderwidth=0, activestyle='none',
+                                      cursor='hand2',
+                                      selectbackground='#def3f6', selectforeground='#008fa5')
+        self.mention_list.pack(fill='x')
+        self.mention_list.bind('<Button-1>', self.click_mention)
         toolbar = tk.Frame(self.input_frame, bg='white')
         toolbar.pack(fill='x')
-        tk.Button(toolbar, text='@', command=self.choose_mention, font=('맑은 고딕', 17), bd=0, bg='white', fg='#435560', activebackground='#f0f5f8', cursor='hand2').pack(side='left')
         tk.Label(toolbar, text='Enter 전송 · Shift/Alt+Enter 줄바꿈', bg='white', fg='#a2adb5', font=('맑은 고딕', 9)).pack(side='left', padx=8)
         self.button = tk.Button(toolbar, text='전송', command=self.send, bg='#00a6bd', fg='white', activebackground='#008fa5', activeforeground='white', relief='flat', bd=0, padx=14, pady=6, cursor='hand2')
         self.button.pack(side='right')
@@ -402,6 +219,8 @@ class Chat:
         self.composer.tag_lower('background')
         self.composer.itemconfigure(self.composer_window, width=max(1, width-32))
         self.reply_label.configure(wraplength=max(100, width-180))
+        if self.mention_rows:
+            self.window.after_idle(self.position_mentions)
 
     def schedule_render(self, event=None):
         if self.resize_job:
@@ -409,10 +228,13 @@ class Chat:
         self.resize_job = self.window.after(80, self.render)
 
     def close(self):
-        if self.inline_ime:
-            if self.inline_ime.active:
-                complete_ime(self.input)
-            self.inline_ime.detach()
+        self.hide_message_menu()
+        complete_ime(self.input)
+        if self.ime_preview:
+            self.ime_preview.close()
+        if self.mention_job:
+            self.window.after_cancel(self.mention_job)
+            self.mention_job = None
         if self.send_job:
             self.window.after_cancel(self.send_job)
         if self.resize_job:
@@ -428,7 +250,10 @@ class Chat:
         self.resize_job = None
         bottom = self.view.yview()[1] >= .98
         position = self.view.yview()[0]
+        if not self.selection_dragging and not self.view.select_item():
+            self.clear_message_selection()
         self.view.delete('all')
+        self.message_text_items = {}
         ordered = sorted(self.messages.values(), key=lambda m: m.id)[-500:]
         self.messages = {m.id: m for m in ordered}
         width = max(380, self.view.winfo_width())
@@ -445,10 +270,11 @@ class Chat:
             tag = f'message_{message.id}'
             if not own:
                 self.view.create_oval(10,y,42,y+32,fill='#c7d6de',outline='',tags=tag)
-                self.view.create_text(26,y+16,text=message.author.display_name[:1],fill='#3f5f70',font=('맑은 고딕',11,'bold'),tags=tag)
-                self.view.create_text(52,y+3,text=message.author.display_name,anchor='nw',fill='#718493',font=('맑은 고딕',9),tags=tag)
+                name = self.user_name(message.author, getattr(message, 'guild', None))
+                self.view.create_text(26,y+16,text=name[:1],fill='#3f5f70',font=('맑은 고딕',11,'bold'),tags=tag)
+                self.view.create_text(52,y+3,text=name,anchor='nw',fill='#718493',font=('맑은 고딕',9),tags=tag)
                 y += 24
-            body = message_text(message).split('\n', 1)[1].rstrip('\n')
+            body = message_text(message, getattr(self.app.bridge, 'member_names', None)).split('\n', 1)[1].rstrip('\n')
             text_id = self.view.create_text(0,0,text=body,anchor='nw',width=max(150,int(width*.64)),font=('맑은 고딕',10),fill='white' if own else '#314b5c',tags=tag)
             box = self.view.bbox(text_id)
             bw, bh = box[2]-box[0]+26, box[3]-box[1]+20
@@ -456,10 +282,12 @@ class Chat:
             bubble = self.rounded(self.view,x,y,x+bw,y+bh,'#00a6bd' if own else 'white',tags=tag)
             self.view.tag_lower(bubble,text_id)
             self.view.coords(text_id,x+13,y+10)
+            self.message_text_items[message.id] = (text_id, body)
             self.view.create_text(x-8 if own else x+bw+8,y+bh-3,text=f'{local:%H:%M}',anchor='se' if own else 'sw',fill='#8a9aa7',font=('맑은 고딕',8),tags=tag)
             self.view.tag_bind(tag,'<Button-3>',lambda event, mid=message.id: self.message_menu(event,mid))
             y += bh+16
         self.view.configure(scrollregion=(0,0,width,y+12))
+        self.restore_message_selection()
         if bottom:
             self.view.yview_moveto(1)
         else:
@@ -468,19 +296,146 @@ class Chat:
     def message_menu(self, event, mid):
         if mid not in self.messages:
             return
-        menu = tk.Menu(self.window, tearoff=False)
-        menu.add_command(label='답장', command=lambda: self.set_reply(mid))
-        menu.add_command(label='작성자 멘션', command=lambda: self.insert_mention(self.messages[mid].author.id))
-        menu.add_command(label='내용 복사', command=lambda: self.copy_message(mid))
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
+        self.hide_message_menu()
+        menu = self.message_menu_frame = tk.Frame(
+            self.window, bg='white', padx=5, pady=5,
+            highlightthickness=1, highlightbackground='#dce5eb')
+        actions = [('답장', lambda: self.set_reply(mid)),
+                   ('작성자 멘션', lambda: self.insert_mention(self.messages[mid].author.id))]
+        if mid == self.selection_mid and self.selected_message_text():
+            actions.append(('선택 영역 복사', self.copy_selection))
+        else:
+            actions.append(('내용 복사', lambda: self.copy_message(mid)))
+        for text, action in actions:
+            def invoke(action=action):
+                self.hide_message_menu()
+                if mid in self.messages:
+                    action()
+            item = tk.Button(menu, text=text, command=invoke, anchor='w',
+                             font=('맑은 고딕', 10), bg='white', fg='#314b5c',
+                             activebackground='#def3f6', activeforeground='#008fa5',
+                             relief='flat', bd=0, highlightthickness=0,
+                             padx=14, pady=8, cursor='hand2')
+            item.pack(fill='x')
+            item.bind('<Enter>', lambda event, button=item: button.configure(bg='#def3f6', fg='#008fa5'))
+            item.bind('<Leave>', lambda event, button=item: button.configure(bg='white', fg='#314b5c'))
+        root = self.window.winfo_toplevel()
+        click = root.bind('<Button-1>', self.message_menu_click, add='+')
+        escape = root.bind('<Escape>', self.dismiss_message_menu, add='+')
+        self.message_menu_bindings = [(root, '<Button-1>', click), (root, '<Escape>', escape)]
+        self.window.after_idle(lambda: self.position_message_menu(event.x_root, event.y_root))
+
+    def position_message_menu(self, screen_x, screen_y):
+        menu = self.message_menu_frame
+        if menu is None:
+            return
+        width = max(145, menu.winfo_reqwidth())
+        height = menu.winfo_reqheight()
+        x = min(max(4, screen_x-self.window.winfo_rootx()), max(4, self.window.winfo_width()-width-4))
+        y = min(max(4, screen_y-self.window.winfo_rooty()), max(4, self.window.winfo_height()-height-4))
+        menu.place(x=x, y=y, width=width, height=height)
+        menu.lift()
+
+    def hide_message_menu(self):
+        if self.message_menu_frame is not None:
+            self.message_menu_frame.destroy()
+            self.message_menu_frame = None
+        for root, sequence, callback in self.message_menu_bindings:
+            root.unbind(sequence, callback)
+        self.message_menu_bindings = []
+
+    def dismiss_message_menu(self, event=None):
+        self.hide_message_menu()
+        return 'break'
+
+    def message_menu_click(self, event):
+        widget = event.widget
+        while widget is not None:
+            if widget is self.message_menu_frame:
+                return
+            widget = getattr(widget, 'master', None)
+        self.hide_message_menu()
 
     def copy_message(self, mid):
         if mid in self.messages:
             self.window.clipboard_clear()
             self.window.clipboard_append(self.messages[mid].clean_content)
+
+    def clear_message_selection(self, event=None):
+        self.view.select_clear()
+        self.selection_mid = None
+        self.selection_anchor = self.selection_start = self.selection_end = None
+        self.selection_body = ''
+        self.selection_dragging = False
+        return 'break'
+
+    def start_message_selection(self, event):
+        self.clear_message_selection()
+        x, y = self.view.canvasx(event.x), self.view.canvasy(event.y)
+        hits = self.view.find_overlapping(x, y, x, y)
+        for mid, (item, body) in self.message_text_items.items():
+            if item in hits:
+                self.view.focus_set()
+                self.selection_mid = mid
+                self.selection_body = body
+                self.selection_anchor = self.view.index(item, f'@{int(x)},{int(y)}')
+                self.selection_pointer = (event.x, event.y)
+                self.selection_dragging = True
+                break
+
+    def drag_message_selection(self, event):
+        if not self.selection_dragging or self.selection_mid not in self.message_text_items:
+            return
+        if abs(event.x-self.selection_pointer[0]) + abs(event.y-self.selection_pointer[1]) < 3:
+            return 'break'
+        item, body = self.message_text_items[self.selection_mid]
+        if body != self.selection_body:
+            return self.clear_message_selection()
+        x, y = self.view.canvasx(event.x), self.view.canvasy(event.y)
+        index = self.view.index(item, f'@{int(x)},{int(y)}')
+        self.view.select_from(item, self.selection_anchor)
+        self.view.select_to(item, index)
+        self.selection_start = self.view.index(item, 'sel.first')
+        self.selection_end = self.view.index(item, 'sel.last')
+        if event.y < 15:
+            self.view.yview_scroll(-1, 'units')
+        elif event.y > self.view.winfo_height()-15:
+            self.view.yview_scroll(1, 'units')
+        return 'break'
+
+    def finish_message_selection(self, event):
+        if self.selection_dragging:
+            self.drag_message_selection(event)
+        self.selection_dragging = False
+
+    def restore_message_selection(self):
+        data = self.message_text_items.get(self.selection_mid)
+        if not data or data[1] != self.selection_body:
+            self.clear_message_selection()
+            return
+        if self.selection_start is not None and self.selection_end is not None:
+            item = data[0]
+            self.view.select_from(item, self.selection_start)
+            self.view.select_to(item, self.selection_end)
+
+    def selected_message_text(self):
+        data = self.message_text_items.get(self.selection_mid)
+        if not data or data[1] != self.selection_body or self.view.select_item() != data[0]:
+            return ''
+        try:
+            start = self.view.index(data[0], 'sel.first')
+            end = self.view.index(data[0], 'sel.last')
+            # Tcl indices also handle emoji/surrogate pairs consistently with Canvas.
+            return self.window.tk.call('string', 'range', data[1], start, end)
+        except tk.TclError:
+            return ''
+
+    def copy_selection(self, event=None):
+        text = self.selected_message_text()
+        if text:
+            self.window.clipboard_clear()
+            self.window.clipboard_append(text)
+        return 'break'
 
     def set_reply(self, mid):
         if str(self.button['state']) == 'disabled':
@@ -490,7 +445,7 @@ class Chat:
             return
         self.reply_id = mid
         preview = message.clean_content.replace('\n', ' ')[:80] or '[첨부 메시지]'
-        self.reply_label.configure(text=f'↳ {message.author.display_name}: {preview}')
+        self.reply_label.configure(text=f'↳ {self.user_name(message.author, getattr(message, "guild", None))}: {preview}')
         self.reply_frame.pack(fill='x', before=self.input)
         self.window.after_idle(self.layout_composer)
         self.input.focus_set()
@@ -502,68 +457,117 @@ class Chat:
         self.reply_frame.pack_forget()
         self.window.after_idle(self.layout_composer)
 
-    def input_key(self, event):
-        if event.char == '@':
-            self.choose_mention(remove_at=True)
+    def input_modified(self, event=None):
+        if self.input.edit_modified():
+            self.input.edit_modified(False)
+            self.schedule_mentions()
 
-    def choose_mention(self, remove_at=False):
-        if self.mention_window and self.mention_window.winfo_exists():
-            self.mention_window.lift()
+    def input_key(self, event=None):
+        if event is None or event.keysym not in ('Up', 'Down', 'Escape', 'Return'):
+            self.schedule_mentions()
+
+    def schedule_mentions(self):
+        if self.mention_job:
+            self.window.after_cancel(self.mention_job)
+        self.mention_job = self.window.after(80, self.update_mentions)
+
+    def hide_mentions(self):
+        self.mention_frame.place_forget()
+        self.mention_rows = []
+        self.mention_range = None
+
+    def position_mentions(self):
+        if not self.mention_rows or not self.window.winfo_ismapped():
             return
-        # Message authors and mentioned users work without the privileged Members intent.
+        width = max(100, self.composer.winfo_width() - 32)
+        height = self.mention_frame.winfo_reqheight()
+        bottom = self.composer.winfo_y() - 4
+        top = self.view.winfo_y()
+        height = min(height, max(40, bottom - top))
+        self.mention_frame.place(x=self.composer.winfo_x() + 16,
+                                 y=max(top, bottom-height), width=width, height=height)
+        self.mention_frame.lift()
+
+    def dismiss_mention(self, event=None):
+        self.hide_message_menu()
+        self.mention_dismissed = self.input.get('1.0', 'insert')
+        self.hide_mentions()
+        return 'break'
+
+    def update_mentions(self):
+        self.mention_job = None
+        if not self.input.winfo_exists() or self.input.focus_get() is not self.input:
+            self.hide_mentions()
+            return
+        prefix = self.input.get('1.0', 'insert')
+        match = re.search(r'(?:^|[\s(])@([^\s@<>,!?;:()\[\]{}]*)$', prefix)
+        if not match or prefix == self.mention_dismissed or self.input.tag_ranges('sel'):
+            self.hide_mentions()
+            return
+        query = match.group(1).casefold()
         users = {}
         for message in self.messages.values():
             for user in [message.author, *message.mentions]:
                 users[user.id] = user
-        if not users:
-            self.status.set('멘션할 사용자가 없습니다. 대화를 불러온 후 다시 시도하세요.')
+        rows = sorted((user for user in users.values()
+                       if query in f'{self.user_name(user)} {user.name} {user.id}'.casefold()),
+                      key=lambda user: (self.user_name(user).casefold(), user.id))
+        if not rows:
+            self.hide_mentions()
             return
-        self.input.mark_set('mention_insert', 'insert')
-        self.input.mark_gravity('mention_insert', 'left')
-        popup = self.mention_window = tk.Toplevel(self.window)
-        popup.title('멘션 선택 · 불러온 대화의 사용자')
-        popup.geometry('380x320')
-        search = ttk.Entry(popup)
-        search.pack(fill='x', padx=10, pady=10)
-        listing = tk.Listbox(popup, exportselection=False)
-        listing.pack(fill='both', expand=True, padx=10)
-        def hover_user(event):
-            box = listing.bbox(listing.nearest(event.y)) if listing.size() else None
-            listing.configure(cursor='hand2' if box and box[1] <= event.y < box[1]+box[3] else '')
-        listing.bind('<Motion>', hover_user)
-        listing.bind('<Leave>', lambda event: listing.configure(cursor=''))
-        rows = []
+        self.mention_rows = rows
+        self.mention_range = (self.input.index(f'insert-{len(match.group(1))+1}c'), self.input.index('insert'))
+        self.mention_list.delete(0, 'end')
+        for user in rows:
+            self.mention_list.insert('end', f'  {self.user_name(user)}')
+        self.mention_list.configure(height=min(5, len(rows)))
+        self.mention_list.selection_set(0)
+        self.window.after_idle(self.position_mentions)
 
-        def refresh(*_):
-            query = search.get().casefold()
-            rows[:] = sorted((u for u in users.values()
-                              if query in f'{u.display_name} {u.name} {u.id}'.casefold()),
-                             key=lambda u: (u.display_name.casefold(), u.id))
-            listing.delete(0, 'end')
-            for user in rows:
-                listing.insert('end', f'{user.display_name} (@{user.name}) · {user.id}')
-            if rows:
-                listing.selection_set(0)
+    def user_name(self, user, guild=None):
+        if guild is None:
+            guild = next((getattr(message, 'guild', None) for message in self.messages.values()
+                          if getattr(message, 'guild', None) is not None), None)
+        return server_display_name(user, guild, getattr(self.app.bridge, 'member_names', None))
 
-        def select(event=None):
-            selection = listing.curselection()
-            if not selection:
-                return
-            index = self.input.index('mention_insert')
-            if remove_at and self.input.get(f'{index}-1c', index) == '@':
-                self.input.delete(f'{index}-1c', index)
-            self.input.mark_set('insert', 'mention_insert')
-            self.insert_mention(rows[selection[0]].id)
-            popup.destroy()
+    def move_mention(self, step):
+        if not self.mention_rows:
+            return
+        current = self.mention_list.curselection()
+        index = ((current[0] if current else 0) + step) % len(self.mention_rows)
+        self.mention_list.selection_clear(0, 'end')
+        self.mention_list.selection_set(index)
+        self.mention_list.see(index)
+        return 'break'
 
-        search.bind('<KeyRelease>', refresh)
-        search.bind('<Return>', select)
-        listing.bind('<Double-Button-1>', select)
-        listing.bind('<Return>', select)
-        ttk.Button(popup, text='선택', command=select, cursor='hand2').pack(pady=10)
-        popup.bind('<Escape>', lambda event: popup.destroy())
-        refresh()
-        search.focus_set()
+    def click_mention(self, event):
+        index = self.mention_list.nearest(event.y)
+        if self.mention_rows:
+            self.mention_list.selection_clear(0, 'end')
+            self.mention_list.selection_set(index)
+            self.select_mention()
+        return 'break'
+
+    def select_mention(self):
+        if not self.mention_rows or not self.mention_range:
+            return
+        selection = self.mention_list.curselection()
+        user = self.mention_rows[selection[0] if selection else 0]
+        start, end = self.mention_range
+        self.input.mark_set('mention_start', start)
+        self.input.mark_gravity('mention_start', 'left')
+        self.input.mark_set('mention_end', end)
+        self.input.mark_gravity('mention_end', 'right')
+        complete_ime(self.input)
+        self.hide_mentions()
+
+        def replace():
+            self.input.delete('mention_start', 'mention_end')
+            self.input.mark_set('insert', 'mention_start')
+            self.input.insert('insert', f'<@{user.id}> ')
+            self.input.focus_set()
+
+        self.window.after(30, replace)
 
     def insert_mention(self, user_id):
         self.input.insert('insert', f'<@{user_id}> ')
@@ -579,6 +583,10 @@ class Chat:
         return 'break'
 
     def send(self, event=None):
+        if event is not None and self.mention_rows:
+            self.select_mention()
+            return 'break'
+        self.hide_mentions()
         if str(self.button['state']) == 'disabled':
             return 'break'
         self.button.configure(state='disabled')
@@ -602,7 +610,7 @@ class Chat:
             return
         self.status.set('전송 중…')
         self.app.bridge.submit(self.app.bridge.send_text, self.channel_id, text,
-                               self.reply_id, self.notify_reply.get(), channel_id=self.channel_id)
+                               self.reply_id, channel_id=self.channel_id)
         return 'break'
 
 
@@ -625,7 +633,7 @@ class App:
     def __init__(self, root):
         self.root = root
         root.option_add('*Button.cursor', 'hand2')
-        root.title('채팅봇')
+        root.title(f'채팅봇 {VERSION}')
         root.geometry('1100x780')
         root.minsize(900, 600)
         root.protocol('WM_DELETE_WINDOW', self.close)
@@ -796,6 +804,7 @@ class App:
 
     def hide_chat(self):
         if self.active_chat:
+            self.active_chat.hide_message_menu()
             complete_ime(self.active_chat.input)
             self.active_chat.window.pack_forget()
             self.active_chat = None
@@ -805,6 +814,7 @@ class App:
 
     def show_home(self):
         if self.active_chat:
+            self.active_chat.hide_message_menu()
             complete_ime(self.active_chat.input)
         self.workspace.pack_forget()
         self.auth_page.pack(fill='both', expand=True)

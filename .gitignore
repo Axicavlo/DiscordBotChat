@@ -7,6 +7,13 @@ __pycache__/
 /build/
 /dist/
 /*.spec
+/.build-tools/
+/android/.gradle/
+/android/app/build/
+/android/local.properties
+/native/*.dll
+/native/*.lib
+/native/*.exp
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/

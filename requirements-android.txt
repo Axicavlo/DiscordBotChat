@@ -1,0 +1,8 @@
+-r requirements.txt
+# The launcher builds these as portable Python wheels (C extensions disabled).
+aiohttp==3.14.5
+multidict==7.2.1
+yarl==1.25.1
+frozenlist==1.8.0
+propcache==0.5.4
+certifi

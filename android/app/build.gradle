@@ -1,0 +1,55 @@
+plugins {
+    id 'com.android.application'
+    id 'com.chaquo.python'
+}
+def versionSource = file('../../chatbot_core/version.py').getText('UTF-8')
+def appVersion = (versionSource =~ /VERSION = '([^']+)'/)[0][1]
+def appCode = ((versionSource =~ /VERSION_CODE = (\d+)/)[0][1]).toInteger()
+
+android {
+    namespace 'com.axicavlo.chatbot'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+    buildFeatures { buildConfig true }
+    defaultConfig {
+        applicationId 'com.axicavlo.chatbot'
+        minSdk 24
+        targetSdk 35
+        versionCode appCode
+        versionName appVersion
+        ndk { abiFilters 'arm64-v8a', 'x86_64' }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+// Only the shared package is staged: never package the desktop token or screenshots.
+def stagePython = tasks.register('stageSharedPython', Sync) {
+    from('../../chatbot_core') { into 'chatbot_core' }
+    exclude '**/__pycache__/**', '**/*.pyc'
+    into layout.buildDirectory.dir('sharedPython')
+}
+chaquopy {
+    defaultConfig {
+        version '3.12'
+        if (System.getenv('CHATBOT_BUILD_PYTHON')) {
+            buildPython System.getenv('CHATBOT_BUILD_PYTHON')
+        }
+        pip {
+            options '--find-links', file('../../.build-tools/python-wheels').absolutePath
+            install '-r', '../../requirements-android.txt'
+        }
+    }
+    sourceSets {
+        main { srcDir layout.buildDirectory.dir('sharedPython').get().asFile }
+    }
+}
+tasks.configureEach {
+    if (name.startsWith('generate') && name.endsWith('PythonAssets')) {
+        dependsOn stagePython
+    }
+    if (name.startsWith('merge') && name.endsWith('PythonSources')) {
+        dependsOn stagePython
+    }
+}
