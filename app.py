@@ -372,16 +372,24 @@ class Chat:
     def start_message_selection(self, event):
         self.clear_message_selection()
         x, y = self.view.canvasx(event.x), self.view.canvasy(event.y)
-        hits = self.view.find_overlapping(x, y, x, y)
+        candidates = []
         for mid, (item, body) in self.message_text_items.items():
-            if item in hits:
-                self.view.focus_set()
-                self.selection_mid = mid
-                self.selection_body = body
-                self.selection_anchor = self.view.index(item, f'@{int(x)},{int(y)}')
-                self.selection_pointer = (event.x, event.y)
-                self.selection_dragging = True
-                break
+            bounds = self.view.bbox(item)
+            if bounds:
+                left, top, right, bottom = bounds
+                dx = max(left-x, 0, x-right)
+                dy = max(top-y, 0, y-bottom)
+                # Prefer the message on this row, even across a wide blank margin.
+                candidates.append(((dy, dx), mid, item, body))
+        if not candidates:
+            return
+        _, mid, item, body = min(candidates, key=lambda candidate: candidate[0])
+        self.view.focus_set()
+        self.selection_mid = mid
+        self.selection_body = body
+        self.selection_anchor = self.view.index(item, f'@{int(x)},{int(y)}')
+        self.selection_pointer = (event.x, event.y)
+        self.selection_dragging = True
 
     def drag_message_selection(self, event):
         if not self.selection_dragging or self.selection_mid not in self.message_text_items:
