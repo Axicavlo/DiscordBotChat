@@ -881,21 +881,51 @@ class App:
 
     def render_servers(self):
         self.server_rail.delete('all')
+        self.server_hover_groups = {}
+        self.server_normal_groups = {}
+        self.server_hover = None
+        if not getattr(self, 'server_hover_bound', False):
+            self.server_rail.bind('<Motion>', self.hover_server, add='+')
+            self.server_rail.bind('<Leave>', self.clear_server_hover, add='+')
+            self.server_hover_bound = True
         for index, (sid, name) in enumerate(self.servers):
             y = 10 + index*68
             selected = sid == self.server_id
             tag = f'server:{sid}'
-            Chat.rounded(self.server_rail, 10, y, 58, y+48,
-                         '#00a6bd' if selected else '#edf3f6', radius=12, tags=tag)
+            self.server_normal_groups[tag] = Chat.rounded(
+                self.server_rail, 10, y, 58, y+48,
+                '#00a6bd' if selected else '#dce6ed', radius=12, tags=tag)
+            hover = Chat.rounded(self.server_rail, 10, y, 58, y+48,
+                                 '#dce6ed' if selected else '#c7d6e0', radius=12, tags=tag)
+            self.server_rail.itemconfigure(hover, state='hidden')
+            self.server_hover_groups[tag] = hover
             self.server_rail.create_text(34, y+24, text=name[:3], width=42,
-                                         fill='white' if selected else '#52717d', font=('맑은 고딕', 9, 'bold'), tags=tag)
+                                         fill='white' if selected else '#52717d', font=('맑은 고딕', 9, 'bold'), tags=(tag, f'{tag}:text'))
             self.server_rail.tag_bind(tag, '<Button-1>', lambda event, key=sid: self.select_server(key))
-            self.server_rail.create_text(34, y+57, text=name[:6], fill='#8a9aa7', font=('맑은 고딕', 7), tags=tag)
         self.server_rail.configure(scrollregion=(0, 0, 68, len(self.servers)*68+16))
         if not self.servers:
             self.empty_label.configure(text='참여 중인 서버가 없습니다. 봇을 서버에 초대해 주세요.')
         elif self.server_id is None:
             self.empty_label.configure(text='왼쪽에서 서버를 선택해 주세요.')
+
+    def clear_server_hover(self, event=None):
+        if self.server_hover is not None:
+            self.server_rail.itemconfigure(self.server_hover_groups[self.server_hover], state='hidden')
+            self.server_rail.itemconfigure(self.server_normal_groups[self.server_hover], state='normal')
+            selected = self.server_hover == f'server:{self.server_id}'
+            self.server_rail.itemconfigure(f'{self.server_hover}:text', fill='white' if selected else '#52717d')
+            self.server_hover = None
+
+    def hover_server(self, event):
+        tag = next((tag for tag in self.server_rail.gettags('current')
+                    if tag in self.server_hover_groups), None)
+        if tag != self.server_hover:
+            self.clear_server_hover()
+            if tag is not None:
+                self.server_rail.itemconfigure(self.server_normal_groups[tag], state='hidden')
+                self.server_rail.itemconfigure(self.server_hover_groups[tag], state='normal')
+                self.server_rail.itemconfigure(f'{tag}:text', fill='#52717d')
+                self.server_hover = tag
 
     def channel_text_at(self, x, y):
         tree = self.room_tree
