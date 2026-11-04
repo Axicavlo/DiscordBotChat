@@ -1,24 +1,40 @@
 """Shared Discord behavior for Windows and Android. No UI or OS imports."""
 import asyncio
+import time
 import discord
 
 from .version import VERSION
 
 
-def message_text(message):
+def server_display_name(user, guild=None, names=None):
+    if guild is not None and names is not None:
+        cached = names.get((guild.id, user.id))
+        if cached:
+            return cached
+    if guild is None or getattr(getattr(user, 'guild', None), 'id', None) == guild.id:
+        member = user
+    else:
+        member = guild.get_member(user.id)
+    return (getattr(member, 'nick', None) or getattr(member, 'global_name', None)
+            or getattr(member, 'display_name', None) or getattr(user, 'global_name', None)
+            or getattr(user, 'display_name', None) or getattr(user, 'name', None) or '알 수 없는 사용자')
+
+
+def message_text(message, names=None):
     body = message.clean_content
     if message.reference:
         original = message.reference.resolved
         if isinstance(original, discord.Message):
             preview = original.clean_content.replace('\n', ' ')[:80] or '[첨부 메시지]'
-            body = f'↳ {original.author.display_name}: {preview}\n{body}'
+            body = f'↳ {server_display_name(original.author, original.guild, names)}: {preview}\n{body}'
         else:
             body = f'↳ 원본 메시지 (ID: {message.reference.message_id})\n{body}'
     extras = [a.url for a in message.attachments]
     extras += [e.title or e.description or '[임베드]' for e in message.embeds]
     if extras:
         body += '\n' + '\n'.join(extras)
-    return f'{message.created_at.astimezone():%m/%d %H:%M}  {message.author.display_name}\n{body or "[내용 없음]"}\n'
+    name = server_display_name(message.author, getattr(message, 'guild', None), names)
+    return f'{message.created_at.astimezone():%m/%d %H:%M}  {name}\n{body or "[내용 없음]"}\n'
 
 
 class Bridge(discord.Client):
@@ -28,6 +44,53 @@ class Bridge(discord.Client):
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
         self.events = events
         self.worker_loop = None
+        self.member_names = {}
+        self._name_expiry = {}
+        self._name_tasks = {}
+        self._name_slots = asyncio.Semaphore(4)
+
+    async def _fetch_member_name(self, guild, user):
+        key = (guild.id, user.id)
+        async with self._name_slots:
+            try:
+                member = await guild.fetch_member(user.id)
+                self.member_names[key] = server_display_name(member, guild)
+                self._name_expiry[key] = time.monotonic() + 300
+            except discord.HTTPException:
+                # A departed member or denied lookup must not break messages.
+                self._name_expiry[key] = time.monotonic() + 30
+
+    async def prepare_member_names(self, messages):
+        participants = {}
+        for message in messages:
+            referenced = getattr(getattr(message, 'reference', None), 'resolved', None)
+            sources = [message] + ([referenced] if isinstance(referenced, discord.Message) else [])
+            for source in sources:
+                guild = getattr(source, 'guild', None)
+                if guild is None:
+                    continue
+                for user in [source.author, *source.mentions]:
+                    key = (guild.id, user.id)
+                    if getattr(getattr(user, 'guild', None), 'id', None) == guild.id:
+                        self.member_names[key] = server_display_name(user, guild)
+                        self._name_expiry[key] = time.monotonic() + 300
+                    else:
+                        participants[key] = (guild, user)
+        jobs = []
+        for key, (guild, user) in participants.items():
+            if self._name_expiry.get(key, 0) > time.monotonic():
+                continue
+            task = self._name_tasks.get(key)
+            if task is None:
+                task = asyncio.create_task(self._fetch_member_name(guild, user))
+                self._name_tasks[key] = task
+                task.add_done_callback(lambda done, key=key: self._name_tasks.pop(key, None))
+            jobs.append(task)
+        if jobs:
+            try:
+                await asyncio.wait_for(asyncio.gather(*jobs, return_exceptions=True), timeout=8)
+            except asyncio.TimeoutError:
+                pass
 
     async def on_ready(self):
         self.events.put(('ready', None, str(self.user)))
@@ -62,6 +125,7 @@ class Bridge(discord.Client):
         if channel is None:
             raise RuntimeError('채널에 접근할 수 없습니다.')
         rows = [m async for m in channel.history(limit=100)]
+        await self.prepare_member_names(rows)
         self.events.put(('history', channel_id, list(reversed(rows))))
 
     async def send_text(self, channel_id, text, reply_id=None):
@@ -79,6 +143,7 @@ class Bridge(discord.Client):
 
     async def on_message(self, message):
         if message.guild:
+            await self.prepare_member_names([message])
             self.events.put(('message', message.channel.id, message))
 
     async def on_raw_message_edit(self, payload):
@@ -86,6 +151,7 @@ class Bridge(discord.Client):
             channel = self.get_channel(payload.channel_id)
             if channel:
                 msg = await channel.fetch_message(payload.message_id)
+                await self.prepare_member_names([msg])
                 self.events.put(('message', payload.channel_id, msg))
         except discord.HTTPException:
             pass
