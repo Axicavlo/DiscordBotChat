@@ -49,7 +49,7 @@ public class BotService extends Service {
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null) {
             String action = intent.getAction();
-            if ("connect".equals(action)) command("connect", intent.getStringExtra("token"), "", "", false);
+            if ("connect".equals(action)) command("connect", intent.getStringExtra("token"), "", "");
             else if ("disconnect".equals(action)) {
                 stopping = true;
                 worker.execute(() -> {
@@ -62,13 +62,13 @@ public class BotService extends Service {
         return START_NOT_STICKY;
     }
 
-    void command(String action, String value, String text, String reply, boolean notify) {
+    void command(String action, String value, String text, String reply) {
         if (stopping || worker.isShutdown()) return;
         worker.execute(() -> {
             if (client == null) return;
             try {
                 if ("connect".equals(action)) pendingToken = value;
-                client.callAttr("command", action, value, text, reply, notify);
+                client.callAttr("command", action, value, text, reply);
             } catch (Exception e) {
                 pendingToken = null;
                 fail("처리하지 못했습니다. 연결 상태를 확인하고 다시 시도하세요.");

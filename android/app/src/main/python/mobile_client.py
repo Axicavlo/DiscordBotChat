@@ -50,7 +50,7 @@ class MobileClient:
         self.thread = threading.Thread(target=self.bridge.run_worker, args=(token,), daemon=True)
         self.thread.start()
 
-    def command(self, action, value='', text='', reply_id='', notify=False):
+    def command(self, action, value='', text='', reply_id=''):
         if action == 'connect':
             self.connect(value)
             return
@@ -79,7 +79,7 @@ class MobileClient:
         elif action == 'send' and self.state['channel_id'] and text.strip():
             cid = int(self.state['channel_id'])
             self.bridge.submit(self.bridge.send_text, cid, text,
-                               int(reply_id) if reply_id else None, bool(notify), channel_id=cid)
+                               int(reply_id) if reply_id else None, channel_id=cid)
 
     @staticmethod
     def row(message):

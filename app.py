@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 import queue
+import re
 import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -197,7 +198,9 @@ class Chat:
         self.messages = {}
         self.deleted = set()
         self.reply_id = None
-        self.mention_window = None
+        self.mention_rows = []
+        self.mention_range = None
+        self.mention_dismissed = None
         self.bg = '#e9eef3'
         self.resize_job = None
         self.send_job = None
@@ -221,9 +224,10 @@ class Chat:
         self.reply_frame = tk.Frame(self.input_frame, bg='white')
         self.reply_label = tk.Label(self.reply_frame, bg='white', fg='#52717d', anchor='w', justify='left', wraplength=360)
         self.reply_label.pack(side='left', fill='x', expand=True)
-        ttk.Button(self.reply_frame, text='취소', command=self.clear_reply, cursor='hand2').pack(side='right')
-        self.notify_reply = tk.BooleanVar(value=False)
-        tk.Checkbutton(self.reply_frame, text='알림', variable=self.notify_reply, bg='white', activebackground='white', fg='#7c8995', cursor='hand2').pack(side='right')
+        tk.Button(self.reply_frame, text='×', command=self.clear_reply, cursor='hand2',
+                  width=2, padx=0, pady=0, font=('맑은 고딕', 13),
+                  bg='white', activebackground='white', fg='#52717d', activeforeground='#008fa5',
+                  relief='flat', bd=0, highlightthickness=0).pack(side='right')
         self.input = tk.Text(self.input_frame, height=3, wrap='word', font=('맑은 고딕', 11), relief='flat', bd=0, highlightthickness=0, bg='white', fg='#243746', insertbackground='#00a5bc')
         self.input.pack(fill='x', pady=(8, 6))
         self.inline_ime = InlineIme(self.input) if os.name == 'nt' else None
@@ -231,9 +235,26 @@ class Chat:
         self.input.bind('<Shift-Return>', self.insert_linebreak)
         self.input.bind('<Alt-Return>', self.insert_linebreak)
         self.input.bind('<KeyRelease>', self.input_key)
+        self.input.bind('<ButtonRelease-1>', self.input_key)
+        self.input.bind('<Up>', lambda event: self.move_mention(-1))
+        self.input.bind('<Down>', lambda event: self.move_mention(1))
+        self.input.bind('<Escape>', self.dismiss_mention)
+        self.input.bind('<FocusOut>', lambda event: self.hide_mentions())
+        self.input.bind('<<Modified>>', self.input_modified)
+        self.input.edit_modified(False)
+        self.mention_frame = tk.Frame(self.window, bg='white', highlightthickness=1,
+                                      highlightbackground='#dce5eb', padx=8, pady=6)
+        tk.Label(self.mention_frame, text='멘션할 사용자', anchor='w', bg='white',
+                 fg='#718493', font=('맑은 고딕', 9)).pack(fill='x', pady=(2, 6))
+        self.mention_list = tk.Listbox(self.mention_frame, exportselection=False, takefocus=False,
+                                      height=4, font=('맑은 고딕', 11), bd=0, bg='white', fg='#314b5c',
+                                      highlightthickness=0, selectborderwidth=0, activestyle='none',
+                                      cursor='hand2',
+                                      selectbackground='#def3f6', selectforeground='#008fa5')
+        self.mention_list.pack(fill='x')
+        self.mention_list.bind('<Button-1>', self.click_mention)
         toolbar = tk.Frame(self.input_frame, bg='white')
         toolbar.pack(fill='x')
-        tk.Button(toolbar, text='@', command=self.choose_mention, font=('맑은 고딕', 17), bd=0, bg='white', fg='#435560', activebackground='#f0f5f8', cursor='hand2').pack(side='left')
         tk.Label(toolbar, text='Enter 전송 · Shift/Alt+Enter 줄바꿈', bg='white', fg='#a2adb5', font=('맑은 고딕', 9)).pack(side='left', padx=8)
         self.button = tk.Button(toolbar, text='전송', command=self.send, bg='#00a6bd', fg='white', activebackground='#008fa5', activeforeground='white', relief='flat', bd=0, padx=14, pady=6, cursor='hand2')
         self.button.pack(side='right')
@@ -280,6 +301,8 @@ class Chat:
         self.composer.tag_lower('background')
         self.composer.itemconfigure(self.composer_window, width=max(1, width-32))
         self.reply_label.configure(wraplength=max(100, width-180))
+        if self.mention_rows:
+            self.window.after_idle(self.position_mentions)
 
     def schedule_render(self, event=None):
         if self.resize_job:
@@ -380,68 +403,104 @@ class Chat:
         self.reply_frame.pack_forget()
         self.window.after_idle(self.layout_composer)
 
-    def input_key(self, event):
-        if event.char == '@':
-            self.choose_mention(remove_at=True)
+    def input_modified(self, event=None):
+        if self.input.edit_modified():
+            self.input.edit_modified(False)
+            self.window.after_idle(self.update_mentions)
 
-    def choose_mention(self, remove_at=False):
-        if self.mention_window and self.mention_window.winfo_exists():
-            self.mention_window.lift()
+    def input_key(self, event=None):
+        if event is None or event.keysym not in ('Up', 'Down', 'Escape', 'Return'):
+            self.update_mentions()
+
+    def hide_mentions(self):
+        self.mention_frame.place_forget()
+        self.mention_rows = []
+        self.mention_range = None
+
+    def position_mentions(self):
+        if not self.mention_rows or not self.window.winfo_ismapped():
             return
-        # Message authors and mentioned users work without the privileged Members intent.
+        width = max(100, self.composer.winfo_width() - 32)
+        height = self.mention_frame.winfo_reqheight()
+        bottom = self.composer.winfo_y() - 4
+        top = self.view.winfo_y()
+        height = min(height, max(40, bottom - top))
+        self.mention_frame.place(x=self.composer.winfo_x() + 16,
+                                 y=max(top, bottom-height), width=width, height=height)
+        self.mention_frame.lift()
+
+    def dismiss_mention(self, event=None):
+        self.mention_dismissed = self.input.get('1.0', 'insert')
+        self.hide_mentions()
+        return 'break'
+
+    def update_mentions(self):
+        if not self.input.winfo_exists() or self.input.focus_get() is not self.input:
+            self.hide_mentions()
+            return
+        prefix = self.input.get('1.0', 'insert')
+        match = re.search(r'(?:^|[\s(])@([^\s@<>,!?;:()\[\]{}]*)$', prefix)
+        if not match or prefix == self.mention_dismissed or self.input.tag_ranges('sel'):
+            self.hide_mentions()
+            return
+        query = match.group(1).casefold()
         users = {}
         for message in self.messages.values():
             for user in [message.author, *message.mentions]:
                 users[user.id] = user
-        if not users:
-            self.status.set('멘션할 사용자가 없습니다. 대화를 불러온 후 다시 시도하세요.')
+        rows = sorted((user for user in users.values()
+                       if query in f'{user.display_name} {user.name} {user.id}'.casefold()),
+                      key=lambda user: (user.display_name.casefold(), user.id))
+        if not rows:
+            self.hide_mentions()
             return
-        self.input.mark_set('mention_insert', 'insert')
-        self.input.mark_gravity('mention_insert', 'left')
-        popup = self.mention_window = tk.Toplevel(self.window)
-        popup.title('멘션 선택 · 불러온 대화의 사용자')
-        popup.geometry('380x320')
-        search = ttk.Entry(popup)
-        search.pack(fill='x', padx=10, pady=10)
-        listing = tk.Listbox(popup, exportselection=False)
-        listing.pack(fill='both', expand=True, padx=10)
-        def hover_user(event):
-            box = listing.bbox(listing.nearest(event.y)) if listing.size() else None
-            listing.configure(cursor='hand2' if box and box[1] <= event.y < box[1]+box[3] else '')
-        listing.bind('<Motion>', hover_user)
-        listing.bind('<Leave>', lambda event: listing.configure(cursor=''))
-        rows = []
+        self.mention_rows = rows
+        self.mention_range = (self.input.index(f'insert-{len(match.group(1))+1}c'), self.input.index('insert'))
+        self.mention_list.delete(0, 'end')
+        for user in rows:
+            self.mention_list.insert('end', f'  {user.display_name}  (@{user.name})')
+        self.mention_list.configure(height=min(5, len(rows)))
+        self.mention_list.selection_set(0)
+        self.window.after_idle(self.position_mentions)
 
-        def refresh(*_):
-            query = search.get().casefold()
-            rows[:] = sorted((u for u in users.values()
-                              if query in f'{u.display_name} {u.name} {u.id}'.casefold()),
-                             key=lambda u: (u.display_name.casefold(), u.id))
-            listing.delete(0, 'end')
-            for user in rows:
-                listing.insert('end', f'{user.display_name} (@{user.name}) · {user.id}')
-            if rows:
-                listing.selection_set(0)
+    def move_mention(self, step):
+        if not self.mention_rows:
+            return
+        current = self.mention_list.curselection()
+        index = ((current[0] if current else 0) + step) % len(self.mention_rows)
+        self.mention_list.selection_clear(0, 'end')
+        self.mention_list.selection_set(index)
+        self.mention_list.see(index)
+        return 'break'
 
-        def select(event=None):
-            selection = listing.curselection()
-            if not selection:
-                return
-            index = self.input.index('mention_insert')
-            if remove_at and self.input.get(f'{index}-1c', index) == '@':
-                self.input.delete(f'{index}-1c', index)
-            self.input.mark_set('insert', 'mention_insert')
-            self.insert_mention(rows[selection[0]].id)
-            popup.destroy()
+    def click_mention(self, event):
+        index = self.mention_list.nearest(event.y)
+        if self.mention_rows:
+            self.mention_list.selection_clear(0, 'end')
+            self.mention_list.selection_set(index)
+            self.select_mention()
+        return 'break'
 
-        search.bind('<KeyRelease>', refresh)
-        search.bind('<Return>', select)
-        listing.bind('<Double-Button-1>', select)
-        listing.bind('<Return>', select)
-        ttk.Button(popup, text='선택', command=select, cursor='hand2').pack(pady=10)
-        popup.bind('<Escape>', lambda event: popup.destroy())
-        refresh()
-        search.focus_set()
+    def select_mention(self):
+        if not self.mention_rows or not self.mention_range:
+            return
+        selection = self.mention_list.curselection()
+        user = self.mention_rows[selection[0] if selection else 0]
+        start, end = self.mention_range
+        self.input.mark_set('mention_start', start)
+        self.input.mark_gravity('mention_start', 'left')
+        self.input.mark_set('mention_end', end)
+        self.input.mark_gravity('mention_end', 'right')
+        complete_ime(self.input)
+        self.hide_mentions()
+
+        def replace():
+            self.input.delete('mention_start', 'mention_end')
+            self.input.mark_set('insert', 'mention_start')
+            self.input.insert('insert', f'<@{user.id}> ')
+            self.input.focus_set()
+
+        self.window.after(30, replace)
 
     def insert_mention(self, user_id):
         self.input.insert('insert', f'<@{user_id}> ')
@@ -457,6 +516,10 @@ class Chat:
         return 'break'
 
     def send(self, event=None):
+        if event is not None and self.mention_rows:
+            self.select_mention()
+            return 'break'
+        self.hide_mentions()
         if str(self.button['state']) == 'disabled':
             return 'break'
         self.button.configure(state='disabled')
@@ -480,7 +543,7 @@ class Chat:
             return
         self.status.set('전송 중…')
         self.app.bridge.submit(self.app.bridge.send_text, self.channel_id, text,
-                               self.reply_id, self.notify_reply.get(), channel_id=self.channel_id)
+                               self.reply_id, channel_id=self.channel_id)
         return 'break'
 
 

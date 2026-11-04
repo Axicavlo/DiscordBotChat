@@ -64,7 +64,7 @@ class Bridge(discord.Client):
         rows = [m async for m in channel.history(limit=100)]
         self.events.put(('history', channel_id, list(reversed(rows))))
 
-    async def send_text(self, channel_id, text, reply_id=None, notify_reply=False):
+    async def send_text(self, channel_id, text, reply_id=None):
         channel = self.get_channel(channel_id)
         if channel is None:
             raise RuntimeError('채널에 접근할 수 없습니다.')
@@ -74,7 +74,7 @@ class Bridge(discord.Client):
                                                  fail_if_not_exists=True)
         await channel.send(text, reference=reference,
                            allowed_mentions=discord.AllowedMentions(
-                               users=True, roles=False, everyone=False, replied_user=notify_reply))
+                               users=True, roles=False, everyone=False, replied_user=reply_id is not None))
         self.events.put(('sent', channel_id, (text, reply_id)))
 
     async def on_message(self, message):
