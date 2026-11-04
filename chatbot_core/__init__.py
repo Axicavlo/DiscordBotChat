@@ -4,6 +4,7 @@ import time
 import discord
 
 from .version import VERSION
+from .tournament_discord import TournamentService
 
 
 def server_display_name(user, guild=None, names=None):
@@ -38,7 +39,7 @@ def message_text(message, names=None):
 
 
 class Bridge(discord.Client):
-    def __init__(self, events):
+    def __init__(self, events, state_dir=None):
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
@@ -48,6 +49,14 @@ class Bridge(discord.Client):
         self._name_expiry = {}
         self._name_tasks = {}
         self._name_slots = asyncio.Semaphore(4)
+        self.tournaments = TournamentService(self, state_dir)
+
+    async def setup_hook(self):
+        await self.tournaments.setup()
+
+    async def close(self):
+        await self.tournaments.close()
+        await super().close()
 
     async def _fetch_member_name(self, guild, user):
         key = (guild.id, user.id)
@@ -95,10 +104,12 @@ class Bridge(discord.Client):
     async def on_ready(self):
         self.events.put(('ready', None, str(self.user)))
         await self.publish_servers()
+        await self.tournaments.ready()
 
     async def on_resumed(self):
         self.events.put(('ready', None, str(self.user)))
         await self.publish_servers()
+        await self.tournaments.ready()
 
     async def on_disconnect(self):
         self.events.put(('status', None, '연결 끊김 · 재연결 대기 중'))

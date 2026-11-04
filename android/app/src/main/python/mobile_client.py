@@ -46,7 +46,10 @@ class MobileClient:
         self.deleted.clear()
         self.state.update(connected=False, busy=True, status='연결 중…',
                           servers=[], channels=[], server_id='', channel_id='', messages=[])
-        self.bridge = Bridge(self.events)
+        from java import jclass
+        platform = jclass('com.chaquo.python.Python').getPlatform()
+        state_dir = os.path.join(str(platform.getApplication().getFilesDir().getAbsolutePath()), 'tournaments')
+        self.bridge = Bridge(self.events, state_dir=state_dir)
         self.thread = threading.Thread(target=self.bridge.run_worker, args=(token,), daemon=True)
         self.thread.start()
 

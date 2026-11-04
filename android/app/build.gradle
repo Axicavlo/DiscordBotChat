@@ -46,6 +46,9 @@ chaquopy {
     }
 }
 tasks.configureEach {
+    if (name.startsWith('install') && name.endsWith('PythonRequirements')) {
+        inputs.file(file('../../requirements.txt'))
+    }
     if (name.startsWith('generate') && name.endsWith('PythonAssets')) {
         dependsOn stagePython
     }
