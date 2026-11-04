@@ -8,14 +8,14 @@
 
 ### 후속 변경: Windows 서버 아이콘
 
-- 기본 배경을 더 진하게 해 달라는 요청으로 미선택 아이콘을 `#dce6ed`, 호버를 `#c7d6e0`으로 조정했다. 선택 상태는 청록색을 유지한다. 새 색상도 같은 투명 모서리 생성기로 만든다. Tk에서 새 색상 모서리 로드를 확인했고 `dist/windows-server-contrast/ChatBot.exe` 빌드 성공 후 기본 `dist/ChatBot.exe`에 반영 및 해시 일치를 확인했다. 커밋·푸시는 아직 하지 않았다.
+- 기본 배경을 더 진하게 해 달라는 요청으로 미선택 아이콘을 `#dce6ed`, 호버를 `#c7d6e0`으로 조정했다. 선택 상태는 청록색을 유지한다. 새 색상도 같은 투명 모서리 생성기로 만든다. Tk에서 새 색상 모서리 로드를 확인했고 `dist/windows-server-contrast/ChatBot.exe` 빌드 성공 후 기본 `dist/ChatBot.exe`에 반영 및 해시 일치를 확인했다. c9e69c7로 커밋·푸시 완료했다.
 
-- 라운드 흰 테두리 수정: `tools/build_server_corners.py`로 서버용 radius12 PNG 3개를 재생성했다. RGB는 아이콘 색으로 고정하고 가장자리는 alpha만 부드럽게 처리해 밝은 픽셀을 제거했다. 일반·호버 레이어를 동시에 겹치지 않고 교대로 표시하도록 변경했다. 실제 Tk에서 불투명 가장자리 RGB 일치 및 두 선택 상태의 호버·복원을 확인했다. EXE를 `dist/windows-server-corners`에 빌드하고 기본 `dist/ChatBot.exe`에 반영했으며 해시 일치를 확인했다. 아직 커밋·푸시하지 않았다.
+- 라운드 흰 테두리 수정: `tools/build_server_corners.py`로 서버용 radius12 PNG 3개를 재생성했다. RGB는 아이콘 색으로 고정하고 가장자리는 alpha만 부드럽게 처리해 밝은 픽셀을 제거했다. 일반·호버 레이어를 동시에 겹치지 않고 교대로 표시하도록 변경했다. 실제 Tk에서 불투명 가장자리 RGB 일치 및 두 선택 상태의 호버·복원을 확인했다. EXE를 `dist/windows-server-corners`에 빌드하고 기본 `dist/ChatBot.exe`에 반영했으며 해시 일치를 확인했다. c9e69c7로 커밋·푸시 완료했다.
 
 - 사용자 요청으로 아이콘 아래 서버 이름 텍스트를 제거했다. 아이콘 안의 짧은 이름은 유지한다. 클릭 대상은 아이콘 배경과 내부 텍스트이다.
 - 선택된 서버와 미선택 서버 모두 호버 시 배경색과 글자색을 바꾸고, 마우스가 나가면 원래 상태로 복원한다. 기존 테마의 둥근 모서리 이미지와 색상을 재사용한다.
 - 실제 Tk Canvas에서 아래 이름 제거, 두 선택 상태의 호버·복원, 재렌더링 후 동작을 확인했다. 기본 EXE는 `dist/windows-server-hover/ChatBot.exe` 빌드로 교체했고 해시 일치를 확인했다. Android는 변경하지 않는다.
-- 이 후속 변경은 아직 커밋·푸시하지 않았다. 직전 텍스트 선택 개선과 작업 지침은 `8dbe2a4`로 `origin/codex/dev`에 푸시 완료했다.
+- 이 후속 변경은 c9e69c7로 커밋·푸시 완료했다. 직전 텍스트 선택 개선과 작업 지침은 `8dbe2a4`로 `origin/codex/dev`에 푸시 완료했다.
 
 ### 후속 변경: 텍스트 바깥에서 드래그 시작
 
@@ -28,15 +28,15 @@
 - 저장소: https://github.com/Axicavlo/DiscordBotChat
 - 브랜치: `codex/dev`
 - 최신 기능 커밋: `516e3d0` — `feat: add animated tournament draws` (origin/codex/dev 푸시 완료). Windows 서버 아이콘 수정은 `c9e69c7`로 함께 푸시했다.
-- 현재 소스·로컬 빌드 버전: `1.3.0`, Android `VERSION_CODE = 10300`. 마지막 공개 APK 릴리즈는 1.2.6.
-- APK 릴리즈: https://github.com/Axicavlo/DiscordBotChat/releases/tag/v1.2.6
-- APK 다운로드: https://github.com/Axicavlo/DiscordBotChat/releases/download/v1.2.6/ChatBot-1.2.6.apk
+- 현재 소스·로컬 빌드 버전: `1.3.0`, Android `VERSION_CODE = 10300`. 공개 APK 릴리즈도 1.3.0이다.
+- APK 릴리즈: https://github.com/Axicavlo/DiscordBotChat/releases/tag/v1.3.0
+- APK 다운로드: https://github.com/Axicavlo/DiscordBotChat/releases/download/v1.3.0/ChatBot-1.3.0.apk
 - 문서 작성 전 작업 트리는 기존 미추적 파일 `intent-confirmation.png`, `intent-enabled.png`만 있었다. 삭제하거나 무관한 커밋에 포함하지 않는다.
-- 현재 요청: 주사위 토너먼트 추첨 기능. 설계 논의 후 사용자가 구현 진행을 승인했다. 아래 구현 기록이 이전 구상보다 우선한다. 서버 닉네임과 텍스트 선택 개선은 기존 완료 작업이다.
+- 현재 요청 완료: 주작기 토너먼트 구현·커밋·푸시 및 v1.3.0 APK 릴리즈 게시 완료. 릴리즈 소스는 6d138a7이며 아래 최신 기록이 이전 구상보다 우선한다.
 
 ## 사용자 작업 방식
 
-- 사용자가 제공한 AGENTS.md 지침을 따른다. 명확한 수정 요청과 허가 없이 코드를 바꾸지 않는다. 이번 요청은 인계 문서 작성이다.
+- 사용자가 제공한 AGENTS.md 지침을 따른다. 명확한 수정 요청과 허가 없이 코드를 바꾸지 않는다. 이번 요청은 커밋·푸시 후 APK 릴리즈이며 사용자 승인을 받았다.
 - 저장소 구조 파악·코드 위치 확인은 먼저 `graft map`, `graft ask "질문" --source`, `graft skeleton`, `graft callers` 등을 사용한다. 큰 코드 변경 뒤 `graft build`로 갱신한다.
 - 사용자 승인 없이 별도 에이전트를 생성하지 않는다.
 - 한국어로 간결하게 설명한다. 문제가 없으면 테스트를 불필요하게 반복하지 말라는 사용자 선호가 있다.
@@ -335,3 +335,14 @@ Windows PowerShell, 프로젝트 루트 기준:
 
 - c9e69c7(Windows 아이콘), 516e3d0(토너먼트 기능·문서·테스트)를 origin/codex/dev에 푸시했고 원격 추적 차이0/0을 확인했다. 최초 두 커밋에 들어간 파일 끝 빈 줄 한 건을 후속 커밋에서 정리한다(공개된 커밋은 amend하지 않는다).
 - 코드 동작 변경은 없으므로 테스트를 반복하지 않는다. 공백 정리 후 소스와 배포본을 맞추기 위해 EXE/APK를 재패키징한 다음 v1.3.0 릴리즈를 진행한다. 아직 릴리즈는 공개하지 않았다.
+
+## v1.3.0 APK 릴리즈 게시 완료 (2026-11-04)
+
+- 사용자 순서대로 먼저 커밋·푸시를 완료한 다음 APK 릴리즈를 게시했다. 커밋: c9e69c7(Windows 서버 아이콘), 516e3d0(토너먼트 기능·테스트·문서), 6d138a7(공백 정리·릴리즈 준비). 모두 origin/codex/dev에 푸시했다.
+- 릴리즈: https://github.com/Axicavlo/DiscordBotChat/releases/tag/v1.3.0
+- APK: https://github.com/Axicavlo/DiscordBotChat/releases/download/v1.3.0/ChatBot-1.3.0.apk
+- 버전1.3.0/10300, 크기46,043,151 bytes, 소스 커밋6d138a7cf5a90779df839c5a7d5b33a93b80486e. GitHub의 v1.3.0 태그가 이 커밋을 가리키는지 확인했다. draft=false, 최신 릴리즈로 게시했다.
+- SHA256: 3e9757e70dd0cc2fb9b69c26a66ca25da36c73f3d2c417c15705d76c7fcd06c0. GitHub 업로드 자산 digest·크기와 로컬 APK가 일치하는 것을 게시 전/후 확인했다. 기존1.2.6과 같은 서명 인증서를 유지한다.
+- 푸시된 최종 소스에서 EXE/APK 재패키징 성공, 기본 dist/ChatBot.exe·보관 EXE 및 기본APK·버전APK 각각 해시 일치 확인. 코드 동작 변경이 없는 공백 정리여서 테스트는 반복하지 않았다. 기능 검증은 전체30개+관련2개 및 최신onefile 모의검증(GIF4개/공개수정5회/성공메시지0개) 통과 결과를 사용한다.
+- 배포 도구: .build-tools/publish_release_1.3.0.py, 노트: release_notes_1.3.0.md, 검증 결과: release_1.3.0_receipt.json. 모두 Git 제외. inspect/publish/verify 모드를 구분하며 기존 공개 릴리즈는 덮어쓰지 않는다. Git credential helper 인증은 메모리에서만 사용하고 토큰을 출력·저장하지 않았다. 다른 호스트로 리다이렉트될 때 Authorization 헤더를 제거한다.
+- 사용자 실행 앱 종료 없음. 추가 소스 작업 예정 없음. 릴리즈 완료 기록은 후속 문서 커밋으로 남긴다. 실제 Discord의 최신 GIF 재생은 사용자 환경 확인이 필요하다.
