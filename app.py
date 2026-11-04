@@ -121,9 +121,15 @@ class Chat:
         header.pack(fill='x', padx=22, pady=(20, 12))
         tk.Label(header, text='#', bg='#d5e1e9', fg='#40596a', font=('맑은 고딕', 18, 'bold'), width=2).pack(side='left')
         tk.Label(header, text='#chat', bg=self.bg, fg='#233747', font=('맑은 고딕', 11, 'bold')).pack(side='left', padx=12)
-        self.view = tk.Canvas(self.window, bg=self.bg, highlightthickness=0)
+        self.message_area = tk.Frame(self.window, bg=self.bg)
+        self.message_area.pack(fill='both', expand=True, padx=8)
+        self.view = tk.Canvas(self.message_area, bg=self.bg, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self.message_area, orient='vertical',
+                                       command=self.view.yview, style='Chat.Vertical.TScrollbar')
+        self.scrollbar.pack(side='right', fill='y', padx=(4, 0), pady=3)
+        self.view.configure(yscrollcommand=self.scrollbar.set)
         self.view.configure(selectbackground='#bcecf2', selectforeground='#243746', selectborderwidth=0)
-        self.view.pack(fill='both', expand=True, padx=8)
+        self.view.pack(side='left', fill='both', expand=True)
         self.view.bind('<Configure>', self.schedule_render)
         self.view.bind('<MouseWheel>', lambda event: self.view.yview_scroll(-int(event.delta / 120), 'units'))
         self.view.bind('<Button-1>', self.start_message_selection)
@@ -490,7 +496,7 @@ class Chat:
         width = max(100, self.composer.winfo_width() - 32)
         height = self.mention_frame.winfo_reqheight()
         bottom = self.composer.winfo_y() - 4
-        top = self.view.winfo_y()
+        top = self.view.winfo_rooty() - self.window.winfo_rooty()
         height = min(height, max(40, bottom - top))
         self.mention_frame.place(x=self.composer.winfo_x() + 16,
                                  y=max(top, bottom-height), width=width, height=height)
@@ -669,6 +675,11 @@ class App:
         style.configure('Rooms.Vertical.TScrollbar', background='#dce4eb', troughcolor='white',
                         bordercolor='white', lightcolor='#dce4eb', darkcolor='#dce4eb',
                         borderwidth=0, arrowsize=8, width=8, relief='flat')
+        style.layout('Chat.Vertical.TScrollbar', style.layout('Rooms.Vertical.TScrollbar'))
+        style.configure('Chat.Vertical.TScrollbar', background='#bdcdd8', troughcolor='#e9eef3',
+                        bordercolor='#e9eef3', lightcolor='#bdcdd8', darkcolor='#bdcdd8',
+                        borderwidth=0, arrowsize=10, width=10, relief='flat')
+        style.map('Chat.Vertical.TScrollbar', background=[('pressed', '#8da8b9'), ('active', '#a8bfce')])
         self.rail = tk.Frame(root, bg='#f4f7fa', width=68)
         self.rail.pack(side='left', fill='y')
         self.rail.pack_propagate(False)

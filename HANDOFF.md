@@ -104,7 +104,7 @@ Windows PowerShell, 프로젝트 루트 기준:
 ```
 
 - Windows 기본 실행 파일: `dist\ChatBot.exe` (현재 로컬 빌드 1.3.0).
-- 최신 보관 빌드: `dist\windows-1.3.0\ChatBot.exe`. 이전 버전 보관 폴더도 유지한다.
+- 최신 Windows 보관 빌드: `dist\windows-scrollbar\ChatBot.exe` (1.3.0 표시, 스크롤바 후속 수정). 릴리즈 당시 `dist\windows-1.3.0\ChatBot.exe`와 이전 빌드도 유지한다.
 - Android 최신 로컬 빌드: `dist\ChatBot.apk`, `dist\ChatBot-1.3.0.apk`. 1.2.6 APK도 유지한다.
 - `build_exe.bat`은 IME DLL을 빌드하고 PyInstaller 단일 windowed EXE에 assets와 DLL을 포함한다.
 - 버전별 경로로 따로 빌드한다면 다음 명령을 쓸 수 있다. C 소스를 바꿨다면 먼저 `tools\build_ime.py`를 실행한다.
@@ -346,3 +346,18 @@ Windows PowerShell, 프로젝트 루트 기준:
 - 푸시된 최종 소스에서 EXE/APK 재패키징 성공, 기본 dist/ChatBot.exe·보관 EXE 및 기본APK·버전APK 각각 해시 일치 확인. 코드 동작 변경이 없는 공백 정리여서 테스트는 반복하지 않았다. 기능 검증은 전체30개+관련2개 및 최신onefile 모의검증(GIF4개/공개수정5회/성공메시지0개) 통과 결과를 사용한다.
 - 배포 도구: .build-tools/publish_release_1.3.0.py, 노트: release_notes_1.3.0.md, 검증 결과: release_1.3.0_receipt.json. 모두 Git 제외. inspect/publish/verify 모드를 구분하며 기존 공개 릴리즈는 덮어쓰지 않는다. Git credential helper 인증은 메모리에서만 사용하고 토큰을 출력·저장하지 않았다. 다른 호스트로 리다이렉트될 때 Authorization 헤더를 제거한다.
 - 사용자 실행 앱 종료 없음. 추가 소스 작업 예정 없음. 릴리즈 완료 기록은 후속 문서 커밋으로 남긴다. 실제 Discord의 최신 GIF 재생은 사용자 환경 확인이 필요하다.
+
+## Windows 채팅창 세로 스크롤바 추가 (2026-11-04, 완료)
+
+- 사용자 요청으로 app.py의 Chat 메시지 영역 오른쪽에10px 세로 ttk.Scrollbar를 추가했다. Canvas.yview와 yscrollcommand를 양방향 연결하고 기존 마우스 휠 동작을 유지한다.
+- 기존 채널 목록 스크롤바처럼 화살표 없는 스타일을 사용하며 채팅 배경색에 맞춘 트랙·기본/호버/눌림 색을 적용했다. 별도 message_area Frame 안에 Canvas와 스크롤바를 배치했다.
+- Canvas 부모 변경에 맞춰 멘션 목록의 상단 기준을 root 좌표차로 계산하도록 수정하여 헤더와의 위치 관계를 유지했다. 메시지 우클릭 메뉴는 기존 root 좌표차 방식이어서 변경하지 않았다.
+- .build-tools/check_chat_scrollbar.py에서 load_token을 빈 값으로 대체한 실제 App/Tk 숨김 창으로 메시지100개를 렌더했다. 스크롤바 표시·폭10px·thumb 명령과 Canvas 양방향 동기화·마우스 휠·맨 아래 이동·창 크기 변경·멘션 목록 위치를 확인했다. 실제 Discord 접속 없이 검증했다. 전체 토너먼트 테스트는 무관한 UI 변경이므로 반복하지 않았다.
+- Windows EXE를 dist/windows-scrollbar/ChatBot.exe로 빌드하고 기본 dist/ChatBot.exe에 반영·해시 일치 확인했다. 기존 실행 앱은 종료하지 않았다. 앱 재실행 필요.
+- Windows 전용 후속 수정이며 Android 코드·APK·GitHub v1.3.0 릴리즈는 변경하지 않았다. 공통 버전1.3.0/10300 유지. graft 갱신·diff 공백 검사 완료. 사용자 후속 요청으로 app.py/HANDOFF.md를 함께 커밋·푸시한다. 최종 상태는 아래 기록과 Git 원격 추적 상태를 확인한다.
+
+## Windows 스크롤바 커밋·푸시 (2026-11-04)
+
+- 사용자 요청 ‘커밋 푸시까지’에 따라 Windows 스크롤바 변경과 인계 기록을 함께 커밋하고 origin/codex/dev에 반영했다. 커밋 메시지: feat: add Windows chat scrollbar. 실제 SHA는 Git 로그를 확인한다.
+- 사전 fetch 결과 HEAD와 origin/codex/dev 차이0/0, 변경 파일은 app.py/HANDOFF.md 두 개뿐이었다. diff 공백 검사 통과. 직전 실제 Tk 스크롤·휠·리사이즈·멘션 위치 검증 및 EXE 빌드 결과를 사용하고 테스트/빌드는 반복하지 않았다.
+- Android APK 및 v1.3.0 릴리즈 변경 없음. 사용자 실행 앱 종료 없음. 완료 후 Git 작업 트리와 원격 추적 상태를 확인한다.
