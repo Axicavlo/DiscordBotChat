@@ -27,7 +27,7 @@
 - 경로: `C:\Users\itcon\Documents\ChatGPT\봇`
 - 저장소: https://github.com/Axicavlo/DiscordBotChat
 - 브랜치: `codex/dev`
-- 최신 커밋: `8dbe2a4` — `fix: allow chat selection from blank space` (푸시 완료). 추첨 기능과 Windows 서버 아이콘 후속 수정은 미커밋 상태.
+- 최신 기능 커밋: `516e3d0` — `feat: add animated tournament draws` (origin/codex/dev 푸시 완료). Windows 서버 아이콘 수정은 `c9e69c7`로 함께 푸시했다.
 - 현재 소스·로컬 빌드 버전: `1.3.0`, Android `VERSION_CODE = 10300`. 마지막 공개 APK 릴리즈는 1.2.6.
 - APK 릴리즈: https://github.com/Axicavlo/DiscordBotChat/releases/tag/v1.2.6
 - APK 다운로드: https://github.com/Axicavlo/DiscordBotChat/releases/download/v1.2.6/ChatBot-1.2.6.apk
@@ -330,3 +330,8 @@ Windows PowerShell, 프로젝트 루트 기준:
 - 변경 텍스트16개 토큰 패턴 검사 발견0건. 이전 전체테스트30개 및 onefile 모의검증(GIF4개/수정5회) 통과 결과를 사용하며 불필요하게 반복하지 않았다.
 - Windows 서버 아이콘 후속 수정7개 파일을 c9e69c7 (fix: refine Windows server icons)로 커밋했다. 다음으로 토너먼트 기능·테스트·문서를 커밋하여 origin/codex/dev에 푸시한다.
 - GitHub 연결 도구에 릴리즈 업로드 기능이 없어 기존 Git credential helper를 메모리에서만 사용한 GitHub REST API 방식으로 배포할 예정이다. 토큰을 출력하거나 파일에 저장하지 않는다. dist/.build-tools/인증파일/미리보기는 소스 커밋에서 제외한다.
+
+### 커밋·푸시 확인 및 릴리즈 준비
+
+- c9e69c7(Windows 아이콘), 516e3d0(토너먼트 기능·문서·테스트)를 origin/codex/dev에 푸시했고 원격 추적 차이0/0을 확인했다. 최초 두 커밋에 들어간 파일 끝 빈 줄 한 건을 후속 커밋에서 정리한다(공개된 커밋은 amend하지 않는다).
+- 코드 동작 변경은 없으므로 테스트를 반복하지 않는다. 공백 정리 후 소스와 배포본을 맞추기 위해 EXE/APK를 재패키징한 다음 v1.3.0 릴리즈를 진행한다. 아직 릴리즈는 공개하지 않았다.

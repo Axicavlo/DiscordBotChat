@@ -522,5 +522,3 @@ class PageView(discord.ui.View):
     def page(pages, index):
         return discord.Embed(title=f'주작 상세 · {index + 1}/{len(pages)}',
                              description='\n'.join(safe_name(x) for x in pages[index])[:4000], colour=0x00A6BD)
-
-
