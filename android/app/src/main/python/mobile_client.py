@@ -84,11 +84,19 @@ class MobileClient:
             self.bridge.submit(self.bridge.send_text, cid, text,
                                int(reply_id) if reply_id else None, channel_id=cid)
 
+        elif action in ('edit', 'delete') and self.state['channel_id']:
+            cid = int(self.state['channel_id'])
+            method = self.bridge.edit_text if action == 'edit' else self.bridge.delete_message
+            args = (cid, int(value), text) if action == 'edit' else (cid, int(value))
+            self.bridge.submit(method, *args, channel_id=cid)
+
     def row(self, message):
         names = getattr(self.bridge, 'member_names', None)
         return dict(id=str(message.id), author_id=str(message.author.id),
                     author=server_display_name(message.author, getattr(message, 'guild', None), names),
-                    text=message_text(message, names))
+                    text=message_text(message, names), content=message.content, edited=bool(message.edited_at),
+                    time=message.created_at.astimezone().strftime("%H:%M"),
+                    own=bool(self.bridge.user and message.author.id == self.bridge.user.id))
 
     def snapshot(self):
         for _ in range(1000):
@@ -124,6 +132,11 @@ class MobileClient:
             elif kind == 'deleted' and current:
                 self.deleted.add(data)
                 self.messages.pop(data, None)
+                self.state['status'] = '메시지 삭제 완료'
+            elif kind == 'edited' and current:
+                self.state['status'] = '메시지 편집 완료'
+                self.state['edit_serial'] = self.state.get('edit_serial', 0) + 1
+                self.state['edited_id'] = str(data)
             elif kind == 'sent' and current:
                 self.state['sent'] += 1
                 self.state['status'] = '전송 완료'

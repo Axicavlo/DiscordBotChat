@@ -152,6 +152,29 @@ class Bridge(discord.Client):
                                users=True, roles=False, everyone=False, replied_user=reply_id is not None))
         self.events.put(('sent', channel_id, (text, reply_id)))
 
+    async def own_message(self, channel_id, message_id):
+        channel = self.get_channel(channel_id)
+        if channel is None:
+            raise RuntimeError('채널에 접근할 수 없습니다.')
+        message = await channel.fetch_message(message_id)
+        if self.user is None or message.author.id != self.user.id:
+            raise RuntimeError('이 봇이 보낸 메시지만 편집·삭제할 수 있습니다.')
+        return message
+
+    async def edit_text(self, channel_id, message_id, text):
+        if not text.strip() or len(text) > 2000:
+            raise RuntimeError('메시지는 공백이 아닌 1~2,000자로 입력하세요.')
+        message = await self.own_message(channel_id, message_id)
+        updated = await message.edit(content=text, allowed_mentions=discord.AllowedMentions.none())
+        await self.prepare_member_names([updated])
+        self.events.put(('message', channel_id, updated))
+        self.events.put(('edited', channel_id, message_id))
+
+    async def delete_message(self, channel_id, message_id):
+        message = await self.own_message(channel_id, message_id)
+        await message.delete()
+        self.events.put(('deleted', channel_id, message_id))
+
     async def on_message(self, message):
         if message.guild:
             await self.prepare_member_names([message])
