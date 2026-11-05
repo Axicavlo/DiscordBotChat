@@ -24,6 +24,10 @@ public class MainActivity extends Activity {
     private final Map<String, String> drafts = new HashMap<>();
     private final Map<String, String[]> replies = new HashMap<>();
     private final Map<String, String> serverNames = new HashMap<>(), channelNames = new HashMap<>();
+    private String editId = "", editChannel = "", editSubmitted = null;
+    private long editSerial;
+    private LinearLayout editBubble;
+    private EditText inlineEditor;
     private EditText token, composer;
     private TextView status, replyLabel, channelTitle, chatTitle;
     private LinearLayout serverList, channelList, messages, replyBar, homePage, channelPage, chatPage;
@@ -291,7 +295,7 @@ public class MainActivity extends Activity {
         awaitingServer = ""; awaitingChannel = "";
         String newServer = state.optString("server_id"), newChannel = state.optString("channel_id"); boolean serverChanged = !newServer.equals(serverId);
         if (!newChannel.equals(channelId)) {
-            saveDraft(); channelId = newChannel; restoreDraft(); sending = false;
+            clearInlineEdit(); saveDraft(); channelId = newChannel; restoreDraft(); sending = false;
             if (page == Page.CHAT && channelId.isEmpty()) showPage(Page.CHANNELS);
         }
         serverId = newServer;
@@ -299,6 +303,13 @@ public class MainActivity extends Activity {
         if (rows != null && (!rows.toString().equals(serverRows) || serverChanged)) { serverRows = rows.toString(); serverData = rows; renderServers(); }
         rows = state.optJSONArray("channels");
         if (rows != null && (!rows.toString().equals(channelRows) || serverChanged)) { channelRows = rows.toString(); channelData = rows; renderChannels(); }
+        long newEditSerial = state.optLong("edit_serial");
+        if (newEditSerial != editSerial) {
+            editSerial = newEditSerial;
+            if (editId.equals(state.optString("edited_id")) && editChannel.equals(channelId)) {
+                clearInlineEdit(); messageRows = ""; hideKeyboard();
+            }
+        }
         rows = state.optJSONArray("messages");
         if (rows != null && !rows.toString().equals(messageRows)) { messageRows = rows.toString(); messageData = rows; renderMessages(); }
         long count = state.optLong("sent");
@@ -310,14 +321,37 @@ public class MainActivity extends Activity {
     }
     private void renderMessages() throws JSONException {
         boolean atBottom = messages.getHeight() <= scroll.getHeight() + scroll.getScrollY() + dp(48);
-        messages.removeAllViews(); boolean replyExists = replyId.isEmpty();
+        messages.removeAllViews(); boolean replyExists = replyId.isEmpty(), editExists = editId.isEmpty();
         for (int i = 0; i < messageData.length(); i++) {
-            JSONObject row = messageData.getJSONObject(i); if (replyId.equals(row.getString("id"))) replyExists = true;
-            TextView view = label(row.getString("text"), 14); view.setPadding(dp(10), dp(8), dp(10), dp(8)); view.setBackground(rounded(Color.WHITE, 10));
+            JSONObject row = messageData.getJSONObject(i); String id = row.getString("id");
+            if (replyId.equals(id)) replyExists = true;
+            boolean own = row.optBoolean("own");
+            LinearLayout line = new LinearLayout(this); line.setGravity(Gravity.BOTTOM | (own ? Gravity.RIGHT : Gravity.LEFT));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.bottomMargin = dp(6);
-            messages.addView(view, params); view.setOnLongClickListener(v -> { messageMenu(row); return true; });
+            messages.addView(line, params);
+            LinearLayout meta = column(); meta.setPadding(dp(6), 0, dp(6), dp(2));
+            if (row.optBoolean("edited")) { TextView mark = label("편집됨", 10); mark.setTextColor(Color.rgb(138,154,167)); meta.addView(mark); }
+            TextView clock = label(row.optString("time"), 10); clock.setTextColor(Color.rgb(138,154,167)); meta.addView(clock);
+            if (own) line.addView(meta);
+            if (id.equals(editId) && channelId.equals(editChannel)) {
+                editExists = true;
+                if (editSubmitted != null && editSubmitted.equals(row.optString("content"))) clearInlineEdit();
+            }
+            if (id.equals(editId) && editBubble != null) {
+                if (editBubble.getParent() != null) ((ViewGroup) editBubble.getParent()).removeView(editBubble);
+                line.addView(editBubble, new LinearLayout.LayoutParams(0, -2, 1));
+            } else {
+                String text = row.getString("text"); int newline = text.indexOf('\n');
+                text = (own ? "" : row.optString("author") + "\n") + (newline >= 0 ? text.substring(newline + 1).trim() : text);
+                TextView view = label(text, 14); view.setPadding(dp(10), dp(8), dp(10), dp(8));
+                view.setBackground(rounded(own ? ACCENT : Color.WHITE, 10)); view.setTextColor(own ? Color.WHITE : INK);
+                line.addView(view, new LinearLayout.LayoutParams(0, -2, 1));
+                view.setOnLongClickListener(v -> { messageMenu(row); return true; });
+            }
+            if (!own) line.addView(meta);
         }
-        if (!replyExists) clearReply(); if (atBottom) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+        if (!editExists) clearInlineEdit();
+        if (!replyExists) clearReply(); if (atBottom && editId.isEmpty()) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
     }
     private void updateSend() { send.setEnabled(connected && !channelId.isEmpty() && !sending); }
     private void sendMessage() {
@@ -373,11 +407,87 @@ public class MainActivity extends Activity {
         hideMentions(); composer.requestFocus();
     }
     private void messageMenu(JSONObject row) {
-        new AlertDialog.Builder(this).setItems(new String[]{"답장", "사용자 멘션", "복사"}, (dialog, which) -> {
+        final String targetChannel = channelId;
+        String[] actions = row.optBoolean("own")
+                ? new String[]{"답장", "사용자 멘션", "복사", "편집", "삭제"}
+                : new String[]{"답장", "사용자 멘션", "복사"};
+        new AlertDialog.Builder(this).setItems(actions, (dialog, which) -> {
+            if (!targetChannel.equals(channelId)) return;
             if (which == 0) { setReply(row.optString("id"), row.optString("author")); composer.requestFocus(); }
             else if (which == 1) insertMention(row.optString("author_id"));
-            else getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("메시지", row.optString("text")));
+            else if (which == 2) getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("메시지", row.optString("text")));
+            else if (which == 3) editMessage(row, targetChannel);
+            else new AlertDialog.Builder(this).setTitle("메시지 삭제")
+                    .setMessage("이 메시지를 삭제할까요? 삭제 후에는 복구할 수 없습니다.")
+                    .setNegativeButton("취소", null)
+                    .setPositiveButton("삭제", (confirm, button) -> {
+                        if (targetChannel.equals(channelId)) command("delete", row.optString("id"), "", "");
+                    }).show();
         }).show();
+    }
+    private void clearInlineEdit() {
+        editId = ""; editChannel = ""; editSubmitted = null; editBubble = null; inlineEditor = null;
+    }
+    private void redrawMessages() {
+        try { renderMessages(); } catch (JSONException e) { setStatus("메시지를 표시하지 못했습니다."); }
+    }
+    private void editMessage(JSONObject row, String targetChannel) {
+        editId = row.optString("id"); editChannel = targetChannel; editSubmitted = null;
+        editBubble = column(); editBubble.setPadding(dp(10), dp(8), dp(10), dp(8));
+        editBubble.setBackground(rounded(ACCENT, 10));
+        final EditText editor = inlineEditor = new EditText(this);
+        editor.setTextColor(Color.WHITE);
+        editor.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        editor.setMinLines(3); editor.setMaxLines(8);
+        editor.setText(row.optString("content")); editor.setSelection(editor.length());
+        editBubble.addView(editor, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout controls = new LinearLayout(this); controls.setGravity(Gravity.RIGHT);
+        Button cancel = button("취소"), save = button("저장");
+        for (Button action : new Button[]{cancel, save}) {
+            action.setTextSize(12); action.setMinHeight(0); action.setMinimumHeight(0);
+            action.setPadding(dp(14), dp(6), dp(14), dp(6));
+            action.setElevation(0); action.setStateListAnimator(null);
+            action.setBackgroundTintList(null);
+            action.setTextColor(action == save ? ACCENT : Color.WHITE);
+            action.setBackground(new android.graphics.drawable.RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(Color.rgb(199,233,238)),
+                    rounded(action == save ? Color.rgb(222,243,246) : ACCENT, 8), rounded(Color.WHITE, 8)));
+        }
+        LinearLayout.LayoutParams cancelParams = new LinearLayout.LayoutParams(-2, -2); cancelParams.rightMargin = dp(6);
+        controls.addView(cancel, cancelParams); controls.addView(save); editBubble.addView(controls);
+        cancel.setOnClickListener(v -> { clearInlineEdit(); redrawMessages(); hideKeyboard(); });
+        save.setOnClickListener(v -> {
+            String text = editor.getText().toString();
+            if (text.trim().isEmpty() || text.length() > 2000) {
+                editor.setError("공백이 아닌 1~2,000자로 입력하세요."); return;
+            }
+            if (targetChannel.equals(channelId)) {
+                editSubmitted = text; command("edit", row.optString("id"), text, "");
+            }
+        });
+        editor.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        editor.setOnKeyListener((view, keyCode, event) -> {
+            if (keyCode != KeyEvent.KEYCODE_ENTER && keyCode != KeyEvent.KEYCODE_NUMPAD_ENTER) return false;
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                if (event.isShiftPressed() || event.isAltPressed()) {
+                    int start = Math.max(0, editor.getSelectionStart()), end = Math.max(0, editor.getSelectionEnd());
+                    editor.getText().replace(Math.min(start, end), Math.max(start, end), "\n");
+                } else save.performClick();
+            }
+            return true;
+        });
+        editor.setOnEditorActionListener((view, actionId, event) -> {
+            if (event != null && (event.isShiftPressed() || event.isAltPressed())) return false;
+            if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+                    || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+                    || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER)) {
+                if (event == null || event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) save.performClick();
+                return true;
+            }
+            return false;
+        });
+        redrawMessages(); editor.requestFocus();
+        editor.post(() -> getSystemService(InputMethodManager.class).showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT));
     }
     @Override public void onBackPressed() {
         if (page == Page.CHAT) { saveDraft(); showPage(Page.CHANNELS); renderChannels(); }

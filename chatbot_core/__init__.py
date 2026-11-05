@@ -4,6 +4,7 @@ import time
 import discord
 
 from .version import VERSION
+from .tournament_discord import TournamentService
 
 
 def server_display_name(user, guild=None, names=None):
@@ -38,7 +39,7 @@ def message_text(message, names=None):
 
 
 class Bridge(discord.Client):
-    def __init__(self, events):
+    def __init__(self, events, state_dir=None):
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(intents=intents, allowed_mentions=discord.AllowedMentions.none())
@@ -48,6 +49,14 @@ class Bridge(discord.Client):
         self._name_expiry = {}
         self._name_tasks = {}
         self._name_slots = asyncio.Semaphore(4)
+        self.tournaments = TournamentService(self, state_dir)
+
+    async def setup_hook(self):
+        await self.tournaments.setup()
+
+    async def close(self):
+        await self.tournaments.close()
+        await super().close()
 
     async def _fetch_member_name(self, guild, user):
         key = (guild.id, user.id)
@@ -95,10 +104,12 @@ class Bridge(discord.Client):
     async def on_ready(self):
         self.events.put(('ready', None, str(self.user)))
         await self.publish_servers()
+        await self.tournaments.ready()
 
     async def on_resumed(self):
         self.events.put(('ready', None, str(self.user)))
         await self.publish_servers()
+        await self.tournaments.ready()
 
     async def on_disconnect(self):
         self.events.put(('status', None, '연결 끊김 · 재연결 대기 중'))
@@ -140,6 +151,29 @@ class Bridge(discord.Client):
                            allowed_mentions=discord.AllowedMentions(
                                users=True, roles=False, everyone=False, replied_user=reply_id is not None))
         self.events.put(('sent', channel_id, (text, reply_id)))
+
+    async def own_message(self, channel_id, message_id):
+        channel = self.get_channel(channel_id)
+        if channel is None:
+            raise RuntimeError('채널에 접근할 수 없습니다.')
+        message = await channel.fetch_message(message_id)
+        if self.user is None or message.author.id != self.user.id:
+            raise RuntimeError('이 봇이 보낸 메시지만 편집·삭제할 수 있습니다.')
+        return message
+
+    async def edit_text(self, channel_id, message_id, text):
+        if not text.strip() or len(text) > 2000:
+            raise RuntimeError('메시지는 공백이 아닌 1~2,000자로 입력하세요.')
+        message = await self.own_message(channel_id, message_id)
+        updated = await message.edit(content=text, allowed_mentions=discord.AllowedMentions.none())
+        await self.prepare_member_names([updated])
+        self.events.put(('message', channel_id, updated))
+        self.events.put(('edited', channel_id, message_id))
+
+    async def delete_message(self, channel_id, message_id):
+        message = await self.own_message(channel_id, message_id)
+        await message.delete()
+        self.events.put(('deleted', channel_id, message_id))
 
     async def on_message(self, message):
         if message.guild:

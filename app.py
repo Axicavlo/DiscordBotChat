@@ -100,6 +100,9 @@ class Chat:
         self.messages = {}
         self.deleted = set()
         self.reply_id = None
+        self.edit_mid = None
+        self.edit_frame = None
+        self.edit_ime = None
         self.mention_rows = []
         self.mention_range = None
         self.mention_dismissed = None
@@ -121,9 +124,15 @@ class Chat:
         header.pack(fill='x', padx=22, pady=(20, 12))
         tk.Label(header, text='#', bg='#d5e1e9', fg='#40596a', font=('맑은 고딕', 18, 'bold'), width=2).pack(side='left')
         tk.Label(header, text='#chat', bg=self.bg, fg='#233747', font=('맑은 고딕', 11, 'bold')).pack(side='left', padx=12)
-        self.view = tk.Canvas(self.window, bg=self.bg, highlightthickness=0)
+        self.message_area = tk.Frame(self.window, bg=self.bg)
+        self.message_area.pack(fill='both', expand=True, padx=8)
+        self.view = tk.Canvas(self.message_area, bg=self.bg, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self.message_area, orient='vertical',
+                                       command=self.view.yview, style='Chat.Vertical.TScrollbar')
+        self.scrollbar.pack(side='right', fill='y', padx=(4, 0), pady=3)
+        self.view.configure(yscrollcommand=self.scrollbar.set)
         self.view.configure(selectbackground='#bcecf2', selectforeground='#243746', selectborderwidth=0)
-        self.view.pack(fill='both', expand=True, padx=8)
+        self.view.pack(side='left', fill='both', expand=True)
         self.view.bind('<Configure>', self.schedule_render)
         self.view.bind('<MouseWheel>', lambda event: self.view.yview_scroll(-int(event.delta / 120), 'units'))
         self.view.bind('<Button-1>', self.start_message_selection)
@@ -229,6 +238,7 @@ class Chat:
 
     def close(self):
         self.hide_message_menu()
+        self.cancel_edit(render=False)
         complete_ime(self.input)
         if self.ime_preview:
             self.ime_preview.close()
@@ -256,6 +266,8 @@ class Chat:
         self.message_text_items = {}
         ordered = sorted(self.messages.values(), key=lambda m: m.id)[-500:]
         self.messages = {m.id: m for m in ordered}
+        if self.edit_mid is not None and self.edit_mid not in self.messages:
+            self.cancel_edit(render=False)
         width = max(380, self.view.winfo_width())
         y, last_date = 12, None
         me = getattr(self.app.bridge, 'user', None)
@@ -274,6 +286,14 @@ class Chat:
                 self.view.create_text(26,y+16,text=name[:1],fill='#3f5f70',font=('맑은 고딕',11,'bold'),tags=tag)
                 self.view.create_text(52,y+3,text=name,anchor='nw',fill='#718493',font=('맑은 고딕',9),tags=tag)
                 y += 24
+            if message.id == self.edit_mid:
+                bw = max(240, int(width * .64))
+                self.edit_frame.update_idletasks()
+                bh = self.edit_frame.winfo_reqheight()
+                x = width - bw - 20 if own else 52
+                self.view.create_window(x, y, anchor='nw', window=self.edit_frame, width=bw)
+                y += bh + 16
+                continue
             body = message_text(message, getattr(self.app.bridge, 'member_names', None)).split('\n', 1)[1].rstrip('\n')
             text_id = self.view.create_text(0,0,text=body,anchor='nw',width=max(150,int(width*.64)),font=('맑은 고딕',10),fill='white' if own else '#314b5c',tags=tag)
             box = self.view.bbox(text_id)
@@ -284,6 +304,9 @@ class Chat:
             self.view.coords(text_id,x+13,y+10)
             self.message_text_items[message.id] = (text_id, body)
             self.view.create_text(x-8 if own else x+bw+8,y+bh-3,text=f'{local:%H:%M}',anchor='se' if own else 'sw',fill='#8a9aa7',font=('맑은 고딕',8),tags=tag)
+            if getattr(message, 'edited_at', None):
+                self.view.create_text(x-8 if own else x+bw+8, y+bh-19, text='편집됨',
+                                      anchor='se' if own else 'sw', fill='#8a9aa7', font=('맑은 고딕', 8), tags=tag)
             self.view.tag_bind(tag,'<Button-3>',lambda event, mid=message.id: self.message_menu(event,mid))
             y += bh+16
         self.view.configure(scrollregion=(0,0,width,y+12))
@@ -306,6 +329,9 @@ class Chat:
             actions.append(('선택 영역 복사', self.copy_selection))
         else:
             actions.append(('내용 복사', lambda: self.copy_message(mid)))
+        if self.app.bridge.user and self.messages[mid].author.id == self.app.bridge.user.id:
+            actions.extend([('편집', lambda: self.edit_message(mid)),
+                            ('삭제', lambda: self.delete_message(mid))])
         for text, action in actions:
             def invoke(action=action):
                 self.hide_message_menu()
@@ -324,6 +350,94 @@ class Chat:
         escape = root.bind('<Escape>', self.dismiss_message_menu, add='+')
         self.message_menu_bindings = [(root, '<Button-1>', click), (root, '<Escape>', escape)]
         self.window.after_idle(lambda: self.position_message_menu(event.x_root, event.y_root))
+
+    def cancel_edit(self, render=True):
+        if self.edit_ime:
+            self.edit_ime.close()
+            self.edit_ime = None
+        if self.edit_frame:
+            self.edit_frame.destroy()
+            self.edit_frame = None
+        self.edit_mid = None
+        if render:
+            self.render()
+
+    def edit_message(self, mid):
+        message = self.messages.get(mid)
+        if message is None:
+            return
+        self.cancel_edit(render=False)
+        self.edit_mid = mid
+        frame = self.edit_frame = tk.Frame(self.view, bg='#00a6bd', padx=10, pady=8)
+        editor = tk.Text(frame, width=30, height=min(10, max(3, message.content.count('\n')+2)),
+                         wrap='word', font=('맑은 고딕', 10), bg='#00a6bd', fg='white',
+                         insertbackground='white', relief='flat', undo=True)
+        editor.pack(fill='both', expand=True)
+        editor.insert('1.0', message.content)
+        if os.name == 'nt':
+            self.edit_ime = attach_preview(editor)
+        note = tk.StringVar(value='')
+        tk.Label(frame, textvariable=note, bg='#00a6bd', fg='white').pack(anchor='w')
+
+        def save(event=None):
+            complete_ime(editor)
+            save_button.focus_set()
+            frame.after(30, submit)
+            return 'break'
+
+        def linebreak(event=None):
+            complete_ime(editor)
+            if editor.tag_ranges('sel'):
+                editor.mark_set('insert', 'sel.first')
+                editor.delete('sel.first', 'sel.last')
+            editor.insert('insert', '\n')
+            editor.see('insert')
+            return 'break'
+
+        def submit():
+            if self.edit_frame is not frame:
+                return
+            text = editor.get('1.0', 'end-1c')
+            if not text.strip() or len(text) > 2000:
+                note.set('공백이 아닌 1~2,000자로 입력하세요.')
+                editor.focus_set()
+                return
+            self.app.bridge.submit(self.app.bridge.edit_text, self.channel_id, mid, text,
+                                   channel_id=self.channel_id)
+            self.status.set('메시지 편집 요청 중…')
+
+        controls = tk.Frame(frame, bg='#00a6bd')
+        controls.pack(fill='x')
+        def edit_button(text, command, primary=False):
+            background = '#def3f6' if primary else '#00a6bd'
+            foreground = '#008fa5' if primary else 'white'
+            button = tk.Button(controls, text=text, command=command,
+                               font=('맑은 고딕', 9, 'bold' if primary else 'normal'),
+                               bg=background, fg=foreground, activebackground='#c7e9ee',
+                               activeforeground='#008fa5', relief='flat', bd=0,
+                               highlightthickness=0, padx=14, pady=5, cursor='hand2')
+            button.bind('<Enter>', lambda event: button.configure(bg='#c7e9ee', fg='#008fa5'))
+            button.bind('<Leave>', lambda event: button.configure(bg=background, fg=foreground))
+            return button
+
+        save_button = edit_button('저장', save, primary=True)
+        save_button.pack(side='right')
+        edit_button('취소', self.cancel_edit).pack(side='right', padx=6)
+        editor.bind('<Return>', save)
+        editor.bind('<Shift-Return>', linebreak)
+        editor.bind('<Alt-Return>', linebreak)
+        editor.bind('<KP_Enter>', save)
+        editor.bind('<Shift-KP_Enter>', linebreak)
+        editor.bind('<Alt-KP_Enter>', linebreak)
+        editor.bind('<Escape>', lambda event: self.cancel_edit())
+        self.render()
+        editor.focus_set()
+
+    def delete_message(self, mid):
+        if mid in self.messages and messagebox.askyesno(
+                '메시지 삭제', '이 메시지를 삭제할까요? 삭제 후에는 복구할 수 없습니다.', parent=self.window):
+            self.app.bridge.submit(self.app.bridge.delete_message, self.channel_id, mid,
+                                   channel_id=self.channel_id)
 
     def position_message_menu(self, screen_x, screen_y):
         menu = self.message_menu_frame
@@ -490,7 +604,7 @@ class Chat:
         width = max(100, self.composer.winfo_width() - 32)
         height = self.mention_frame.winfo_reqheight()
         bottom = self.composer.winfo_y() - 4
-        top = self.view.winfo_y()
+        top = self.view.winfo_rooty() - self.window.winfo_rooty()
         height = min(height, max(40, bottom - top))
         self.mention_frame.place(x=self.composer.winfo_x() + 16,
                                  y=max(top, bottom-height), width=width, height=height)
@@ -669,6 +783,11 @@ class App:
         style.configure('Rooms.Vertical.TScrollbar', background='#dce4eb', troughcolor='white',
                         bordercolor='white', lightcolor='#dce4eb', darkcolor='#dce4eb',
                         borderwidth=0, arrowsize=8, width=8, relief='flat')
+        style.layout('Chat.Vertical.TScrollbar', style.layout('Rooms.Vertical.TScrollbar'))
+        style.configure('Chat.Vertical.TScrollbar', background='#bdcdd8', troughcolor='#e9eef3',
+                        bordercolor='#e9eef3', lightcolor='#bdcdd8', darkcolor='#bdcdd8',
+                        borderwidth=0, arrowsize=10, width=10, relief='flat')
+        style.map('Chat.Vertical.TScrollbar', background=[('pressed', '#8da8b9'), ('active', '#a8bfce')])
         self.rail = tk.Frame(root, bg='#f4f7fa', width=68)
         self.rail.pack(side='left', fill='y')
         self.rail.pack_propagate(False)
@@ -881,21 +1000,51 @@ class App:
 
     def render_servers(self):
         self.server_rail.delete('all')
+        self.server_hover_groups = {}
+        self.server_normal_groups = {}
+        self.server_hover = None
+        if not getattr(self, 'server_hover_bound', False):
+            self.server_rail.bind('<Motion>', self.hover_server, add='+')
+            self.server_rail.bind('<Leave>', self.clear_server_hover, add='+')
+            self.server_hover_bound = True
         for index, (sid, name) in enumerate(self.servers):
             y = 10 + index*68
             selected = sid == self.server_id
             tag = f'server:{sid}'
-            Chat.rounded(self.server_rail, 10, y, 58, y+48,
-                         '#00a6bd' if selected else '#edf3f6', radius=12, tags=tag)
+            self.server_normal_groups[tag] = Chat.rounded(
+                self.server_rail, 10, y, 58, y+48,
+                '#00a6bd' if selected else '#dce6ed', radius=12, tags=tag)
+            hover = Chat.rounded(self.server_rail, 10, y, 58, y+48,
+                                 '#dce6ed' if selected else '#c7d6e0', radius=12, tags=tag)
+            self.server_rail.itemconfigure(hover, state='hidden')
+            self.server_hover_groups[tag] = hover
             self.server_rail.create_text(34, y+24, text=name[:3], width=42,
-                                         fill='white' if selected else '#52717d', font=('맑은 고딕', 9, 'bold'), tags=tag)
+                                         fill='white' if selected else '#52717d', font=('맑은 고딕', 9, 'bold'), tags=(tag, f'{tag}:text'))
             self.server_rail.tag_bind(tag, '<Button-1>', lambda event, key=sid: self.select_server(key))
-            self.server_rail.create_text(34, y+57, text=name[:6], fill='#8a9aa7', font=('맑은 고딕', 7), tags=tag)
         self.server_rail.configure(scrollregion=(0, 0, 68, len(self.servers)*68+16))
         if not self.servers:
             self.empty_label.configure(text='참여 중인 서버가 없습니다. 봇을 서버에 초대해 주세요.')
         elif self.server_id is None:
             self.empty_label.configure(text='왼쪽에서 서버를 선택해 주세요.')
+
+    def clear_server_hover(self, event=None):
+        if self.server_hover is not None:
+            self.server_rail.itemconfigure(self.server_hover_groups[self.server_hover], state='hidden')
+            self.server_rail.itemconfigure(self.server_normal_groups[self.server_hover], state='normal')
+            selected = self.server_hover == f'server:{self.server_id}'
+            self.server_rail.itemconfigure(f'{self.server_hover}:text', fill='white' if selected else '#52717d')
+            self.server_hover = None
+
+    def hover_server(self, event):
+        tag = next((tag for tag in self.server_rail.gettags('current')
+                    if tag in self.server_hover_groups), None)
+        if tag != self.server_hover:
+            self.clear_server_hover()
+            if tag is not None:
+                self.server_rail.itemconfigure(self.server_normal_groups[tag], state='hidden')
+                self.server_rail.itemconfigure(self.server_hover_groups[tag], state='normal')
+                self.server_rail.itemconfigure(f'{tag}:text', fill='#52717d')
+                self.server_hover = tag
 
     def channel_text_at(self, x, y):
         tree = self.room_tree
@@ -1060,12 +1209,18 @@ class App:
                             chat.messages[data.id] = data
                         chat.render()
                     elif kind == 'deleted':
+                        if chat.edit_mid == data:
+                            chat.cancel_edit(render=False)
                         chat.deleted.add(data)
                         chat.messages.pop(data, None)
                         if chat.reply_id == data:
                             chat.clear_reply(force=True)
                             chat.status.set('답장 대상 메시지가 삭제되었습니다.')
                         chat.render()
+                    elif kind == 'edited':
+                        if chat.edit_mid == data:
+                            chat.cancel_edit()
+                        chat.status.set('메시지 편집 완료')
                     elif kind == 'sent':
                         text, reply_id = data
                         if chat.input.get('1.0', 'end-1c') == text:
