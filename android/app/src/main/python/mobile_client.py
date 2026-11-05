@@ -10,7 +10,7 @@ import certifi
 # Set before importing aiohttp so certificate verification remains enabled.
 os.environ['SSL_CERT_FILE'] = certifi.where()
 
-from chatbot_core import avatar_url, Bridge, message_text, server_display_name, VERSION
+from chatbot_core import message_view, avatar_url, Bridge, message_text, server_display_name, VERSION
 
 
 class MobileClient:
@@ -93,10 +93,13 @@ class MobileClient:
 
     def row(self, message):
         names = getattr(self.bridge, 'member_names', None)
+        shown = message_view(message, names, True)
+        hidden = message_view(message, names, False)
         return dict(id=str(message.id), author_id=str(message.author.id),
                     author=server_display_name(message.author, getattr(message, 'guild', None), names),
                     text=message_text(message, names), content=message.content, edited=bool(message.edited_at),
                     avatar=avatar_url(message.author, getattr(message, 'guild', None), getattr(self.bridge, 'member_avatars', None)),
+                    body_visible=shown['text'], body_hidden=hidden['text'], media=shown['media'],
                     time=message.created_at.astimezone().strftime("%H:%M"),
                     own=bool(self.bridge.user and message.author.id == self.bridge.user.id))
 

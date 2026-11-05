@@ -22,6 +22,9 @@ public class MainActivity extends Activity {
     private Page page = Page.HOME;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final DiscordImages images = new DiscordImages();
+    private boolean showMedia = false;
+    private final List<ImageView> mediaViews = new ArrayList<>();
+    private final Map<ImageView, JSONArray> mediaSources = new HashMap<>();
     private final Map<String, String> drafts = new HashMap<>();
     private final Map<String, String[]> replies = new HashMap<>();
     private final Map<String, String> serverNames = new HashMap<>(), channelNames = new HashMap<>();
@@ -93,7 +96,13 @@ public class MainActivity extends Activity {
                 insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
             return insets;
         });
-        status = label("봇 토큰을 입력하세요.", 11); status.setPadding(dp(8), dp(2), dp(8), dp(2)); root.addView(status);
+        LinearLayout statusRow = new LinearLayout(this); statusRow.setGravity(Gravity.CENTER_VERTICAL); root.addView(statusRow);
+        status = label("봇 토큰을 입력하세요.", 11); status.setPadding(dp(8), dp(2), dp(8), dp(2));
+        statusRow.addView(status, new LinearLayout.LayoutParams(0, -2, 1));
+        Switch mediaSwitch = new Switch(this); mediaSwitch.setText("이미지 "); mediaSwitch.setTextSize(11);
+        mediaSwitch.setTextColor(INK); mediaSwitch.setChecked(false); mediaSwitch.setPadding(dp(6), 0, dp(8), 0);
+        mediaSwitch.setContentDescription("채팅 이미지·이모지·임베드 표시"); statusRow.addView(mediaSwitch);
+        mediaSwitch.setOnCheckedChangeListener((button, checked) -> { showMedia = checked; redrawMessages(); });
         LinearLayout workspace = new LinearLayout(this); root.addView(workspace, new LinearLayout.LayoutParams(-1, 0, 1));
         LinearLayout rail = column(); rail.setBackgroundColor(Color.rgb(244, 247, 250)); rail.setPadding(dp(5), dp(6), dp(5), dp(6));
         workspace.addView(rail, new LinearLayout.LayoutParams(dp(68), -1));
@@ -165,6 +174,7 @@ public class MainActivity extends Activity {
         content.addView(chatPage, new FrameLayout.LayoutParams(-1, -1));
         chatTitle = label("", 18); chatTitle.setTypeface(null, Typeface.BOLD); chatTitle.setPadding(dp(4), 0, 0, dp(8)); chatPage.addView(chatTitle);
         scroll = new ScrollView(this); messages = column(); scroll.addView(messages);
+        scroll.getViewTreeObserver().addOnScrollChangedListener(() -> loadVisibleMedia());
         FrameLayout conversation = new FrameLayout(this);
         conversation.addView(scroll, new FrameLayout.LayoutParams(-1, -1));
         chatPage.addView(conversation, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -328,7 +338,8 @@ public class MainActivity extends Activity {
     }
     private void renderMessages() throws JSONException {
         boolean atBottom = messages.getHeight() <= scroll.getHeight() + scroll.getScrollY() + dp(48);
-        messages.removeAllViews(); boolean replyExists = replyId.isEmpty(), editExists = editId.isEmpty();
+        stopMediaAnimations(); messages.removeAllViews(); mediaViews.clear(); mediaSources.clear();
+        boolean replyExists = replyId.isEmpty(), editExists = editId.isEmpty();
         for (int i = 0; i < messageData.length(); i++) {
             JSONObject row = messageData.getJSONObject(i); String id = row.getString("id");
             if (replyId.equals(id)) replyExists = true;
@@ -358,18 +369,61 @@ public class MainActivity extends Activity {
                 if (editBubble.getParent() != null) ((ViewGroup) editBubble.getParent()).removeView(editBubble);
                 line.addView(editBubble, new LinearLayout.LayoutParams(0, -2, 1));
             } else {
-                String text = row.getString("text"); int newline = text.indexOf('\n');
-                text = (own ? "" : row.optString("author") + "\n") + (newline >= 0 ? text.substring(newline + 1).trim() : text);
+                String text = (own ? "" : row.optString("author") + "\n")
+                        + row.optString(showMedia ? "body_visible" : "body_hidden");
+                LinearLayout bubble = column(); bubble.setBackground(rounded(own ? ACCENT : Color.WHITE, 10));
                 TextView view = label(text, 14); view.setPadding(dp(10), dp(8), dp(10), dp(8));
-                view.setBackground(rounded(own ? ACCENT : Color.WHITE, 10)); view.setTextColor(own ? Color.WHITE : INK);
-                line.addView(view, new LinearLayout.LayoutParams(0, -2, 1));
+                view.setTextColor(own ? Color.WHITE : INK); bubble.addView(view);
+                line.addView(bubble, new LinearLayout.LayoutParams(0, -2, 1));
                 view.setOnLongClickListener(v -> { messageMenu(row); return true; });
+                JSONArray media = showMedia ? row.optJSONArray("media") : null;
+                LinearLayout emojiRow = null; int emojiCount = 0;
+                int emojiColumns = Math.max(1, (getResources().getDisplayMetrics().widthPixels - dp(180)) / dp(36));
+                if (media != null) for (int j = 0; j < media.length(); j++) {
+                    JSONObject item = media.optJSONObject(j); if (item == null) continue;
+                    boolean emoji = "emoji".equals(item.optString("kind"));
+                    boolean stickerSize = "sticker".equals(item.optString("kind")) || "enlarged_emoji".equals(item.optString("kind"));
+                    ImageView preview = new ImageView(this); preview.setAdjustViewBounds(true);
+                    preview.setMinimumWidth(dp(32)); preview.setMinimumHeight(dp(32));
+                    preview.setMaxWidth(Math.min(dp(stickerSize ? 160 : 320), Math.max(dp(64), getResources().getDisplayMetrics().widthPixels - dp(180))));
+                    preview.setMaxHeight(dp(stickerSize ? 160 : 220));
+                    preview.setScaleType(ImageView.ScaleType.FIT_CENTER); preview.setContentDescription(item.optString("label"));
+                    preview.setTag(item.optString("url"));
+                    LinearLayout.LayoutParams mediaParams = new LinearLayout.LayoutParams(emoji ? dp(32) : -2, emoji ? dp(32) : -2);
+                    if (emoji) {
+                        if (emojiRow == null || emojiCount >= emojiColumns) {
+                            emojiRow = new LinearLayout(this); emojiRow.setPadding(dp(10), 0, dp(10), dp(8));
+                            bubble.addView(emojiRow); emojiCount = 0;
+                        }
+                        mediaParams.rightMargin = dp(4); emojiRow.addView(preview, mediaParams); emojiCount++;
+                    } else {
+                        emojiRow = null;
+                        mediaParams.setMargins(dp(10), 0, dp(10), dp(8)); bubble.addView(preview, mediaParams);
+                    }
+                    mediaViews.add(preview);
+                    mediaSources.put(preview, item.optJSONArray("alternatives"));
+                    preview.setOnLongClickListener(v -> { messageMenu(row); return true; });
+                }
             }
             if (!own) line.addView(meta);
             if (own) line.addView(avatar, avatarParams);
         }
         if (!editExists) clearInlineEdit();
         if (!replyExists) clearReply(); if (atBottom && editId.isEmpty()) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+        scroll.post(() -> loadVisibleMedia());
+    }
+    private void loadVisibleMedia() {
+        if (!showMedia || scroll == null) return;
+        android.graphics.Rect visible = new android.graphics.Rect();
+        for (ImageView view : mediaViews) {
+            if (view.getGlobalVisibleRect(visible)) images.load((String) view.getTag(), view, true, mediaSources.get(view));
+            else if (view.getDrawable() instanceof android.graphics.drawable.Animatable)
+                ((android.graphics.drawable.Animatable) view.getDrawable()).stop();
+        }
+    }
+    private void stopMediaAnimations() {
+        for (ImageView view : mediaViews) if (view.getDrawable() instanceof android.graphics.drawable.Animatable)
+            ((android.graphics.drawable.Animatable) view.getDrawable()).stop();
     }
     private void updateSend() { send.setEnabled(connected && !channelId.isEmpty() && !sending); }
     private void sendMessage() {
@@ -512,6 +566,6 @@ public class MainActivity extends Activity {
         else if (page == Page.CHANNELS) showHome(); else super.onBackPressed();
     }
     @Override protected void onResume() { super.onResume(); lastSnapshot = ""; handler.post(poll); command("refresh", "", "", ""); }
-    @Override protected void onPause() { handler.removeCallbacks(poll); saveDraft(); super.onPause(); }
+    @Override protected void onPause() { stopMediaAnimations(); handler.removeCallbacks(poll); saveDraft(); super.onPause(); }
     @Override protected void onDestroy() { images.close(); super.onDestroy(); }
 }
