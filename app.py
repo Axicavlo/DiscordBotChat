@@ -13,7 +13,8 @@ from tkinter import font as tkfont
 
 import discord
 
-from chatbot_core import Bridge, message_text, safe_error, server_display_name, VERSION
+from desktop_images import ImageCache
+from chatbot_core import avatar_url, Bridge, message_text, safe_error, server_display_name, VERSION
 if os.name == 'nt':
     from windows_ime import attach_preview
 
@@ -263,6 +264,7 @@ class Chat:
         if not self.selection_dragging and not self.view.select_item():
             self.clear_message_selection()
         self.view.delete('all')
+        self.avatar_photos = []
         self.message_text_items = {}
         ordered = sorted(self.messages.values(), key=lambda m: m.id)[-500:]
         self.messages = {m.id: m for m in ordered}
@@ -280,17 +282,24 @@ class Chat:
                 last_date = local.date()
             own = me is not None and message.author.id == me.id
             tag = f'message_{message.id}'
+            avatar_x = width - 42 if own else 10
+            name = self.user_name(message.author, getattr(message, 'guild', None))
+            photo = self.app.images.get(avatar_url(message.author, getattr(message, 'guild', None),
+                                                  getattr(self.app.bridge, 'member_avatars', None)), 32)
+            if photo:
+                self.avatar_photos.append(photo)
+                self.view.create_image(avatar_x, y, anchor='nw', image=photo, tags=tag)
+            else:
+                self.view.create_oval(avatar_x, y, avatar_x+32, y+32, fill='#c7d6de', outline='', tags=tag)
+                self.view.create_text(avatar_x+16, y+16, text=name[:1], fill='#3f5f70', font=('맑은 고딕',11,'bold'), tags=tag)
             if not own:
-                self.view.create_oval(10,y,42,y+32,fill='#c7d6de',outline='',tags=tag)
-                name = self.user_name(message.author, getattr(message, 'guild', None))
-                self.view.create_text(26,y+16,text=name[:1],fill='#3f5f70',font=('맑은 고딕',11,'bold'),tags=tag)
                 self.view.create_text(52,y+3,text=name,anchor='nw',fill='#718493',font=('맑은 고딕',9),tags=tag)
                 y += 24
             if message.id == self.edit_mid:
                 bw = max(240, int(width * .64))
                 self.edit_frame.update_idletasks()
                 bh = self.edit_frame.winfo_reqheight()
-                x = width - bw - 20 if own else 52
+                x = width - bw - 52 if own else 52
                 self.view.create_window(x, y, anchor='nw', window=self.edit_frame, width=bw)
                 y += bh + 16
                 continue
@@ -298,7 +307,7 @@ class Chat:
             text_id = self.view.create_text(0,0,text=body,anchor='nw',width=max(150,int(width*.64)),font=('맑은 고딕',10),fill='white' if own else '#314b5c',tags=tag)
             box = self.view.bbox(text_id)
             bw, bh = box[2]-box[0]+26, box[3]-box[1]+20
-            x = width-bw-20 if own else 52
+            x = width-bw-52 if own else 52
             bubble = self.rounded(self.view,x,y,x+bw,y+bh,'#00a6bd' if own else 'white',tags=tag)
             self.view.tag_lower(bubble,text_id)
             self.view.coords(text_id,x+13,y+10)
@@ -760,6 +769,9 @@ class App:
         root.minsize(900, 600)
         root.protocol('WM_DELETE_WINDOW', self.close)
         self.events = queue.Queue()
+        self.images = ImageCache(self.events)
+        self.server_icons = {}
+        self.server_photos = []
         self.bridge = None
         self.pending_token = None
         self.chats = {}
@@ -906,12 +918,16 @@ class App:
         for chat in list(self.chats.values()):
             chat.close()
         # Isolate events from the previous bot when switching credentials.
+        self.images.close()
         self.events = queue.Queue()
+        self.images = ImageCache(self.events)
+        self.server_icons = {}
         self.connected = False
         self.server_id = None
         self.servers, self.channels = [], []
         self.room_tree.delete(*self.room_tree.get_children())
         self.server_rail.delete('all')
+        self.server_photos = []
         self.resume_button.pack_forget()
         self.bridge = Bridge(self.events)
         self.pending_token = token
@@ -1000,6 +1016,7 @@ class App:
 
     def render_servers(self):
         self.server_rail.delete('all')
+        self.server_photos = []
         self.server_hover_groups = {}
         self.server_normal_groups = {}
         self.server_hover = None
@@ -1018,8 +1035,13 @@ class App:
                                  '#dce6ed' if selected else '#c7d6e0', radius=12, tags=tag)
             self.server_rail.itemconfigure(hover, state='hidden')
             self.server_hover_groups[tag] = hover
-            self.server_rail.create_text(34, y+24, text=name[:3], width=42,
-                                         fill='white' if selected else '#52717d', font=('맑은 고딕', 9, 'bold'), tags=(tag, f'{tag}:text'))
+            photo = self.images.get(self.server_icons.get(sid, ''), 40, circle=False)
+            if photo:
+                self.server_photos.append(photo)
+                self.server_rail.create_image(34, y+24, image=photo, tags=tag)
+            else:
+                self.server_rail.create_text(34, y+24, text=name[:3], width=42,
+                                            fill='white' if selected else '#52717d', font=('맑은 고딕', 9, 'bold'), tags=(tag, f'{tag}:text'))
             self.server_rail.tag_bind(tag, '<Button-1>', lambda event, key=sid: self.select_server(key))
         self.server_rail.configure(scrollregion=(0, 0, 68, len(self.servers)*68+16))
         if not self.servers:
@@ -1155,6 +1177,17 @@ class App:
         try:
             while True:
                 kind, key, data = self.events.get_nowait()
+                if kind == 'image_loaded':
+                    self.images.finish(key, data)
+                    if data is not None:
+                        self.render_servers()
+                        for existing_chat in self.chats.values():
+                            existing_chat.schedule_render()
+                    continue
+                if kind == 'server_icons':
+                    self.server_icons = data
+                    self.render_servers()
+                    continue
                 chat = self.chats.get(key)
                 if kind in ('ready', 'status', 'fatal'):
                     self.status.set(f'연결됨: {data}' if kind == 'ready' else data)
@@ -1236,6 +1269,7 @@ class App:
         self.root.after(100, self.poll)
 
     def close(self):
+        self.images.close()
         for chat in list(self.chats.values()):
             chat.close()
         if self.bridge and self.bridge.worker_loop and self.bridge.worker_loop.is_running():

@@ -406,3 +406,41 @@ Windows PowerShell, 프로젝트 루트 기준:
 
 - 사용자 요청 ‘일단 커밋 푸시’로 공통 Bridge, Windows/Android 편집·삭제 UI, 모바일 데이터, 테스트 및 인계 기록 총6개 파일을 함께 커밋하여 origin/codex/dev에 반영한다. 커밋 제목: feat: add inline message editing and deletion. 최종 SHA와 원격 반영 여부는 Git 로그 및 HEAD...origin/codex/dev 차이로 확인한다.
 - 사전 fetch 결과 원격 codex/dev와 차이0/0. diff 공백 검사 통과. 기존 핵심 테스트4개, 실제 Tk 편집·키 콜백 검증, 최종 EXE/APK 빌드 성공 결과를 사용해 테스트·빌드를 반복하지 않았다. 배포 산출물과 인증파일은 Git 제외 상태를 유지한다. 공개 릴리즈 없음.
+
+### 커밋 완료·푸시 승인 대기
+
+- 로컬 커밋9c82536 완료: feat: add inline message editing and deletion (6개 파일). 커밋 직후 작업 트리 깨끗함 확인.
+- 자동 승인 검토가 원격 전송을 거절했다. 사유: 구체적인 GitHub 저장소·브랜치 및 payload 승인과 목적지 신뢰 검증이 부족하다는 판단. 실제 푸시는 실행하지 않았다. 사용자에게 https://github.com/Axicavlo/DiscordBotChat 의 codex/dev로 해당 커밋(소스·테스트·인계문서6개 파일)을 전송할 승인 요청 필요.
+- 이 중단 기록은 커밋 이후 HANDOFF.md에 추가되어 미커밋 상태이다. 푸시 승인 후 완료 기록과 함께 정리한다.
+
+### 푸시 완료 (2026-11-05)
+
+- 사용자가 목적지·전송 내용 안내 후 ‘푸시’로 승인했다. origin/codex/dev에9c8253619fb236e6efb9bbaf611a6a80caae00a3 푸시 완료. 원격 ls-remote SHA 일치 및 HEAD...origin/codex/dev 차이0/0 확인.
+- 위 승인 대기 상태는 해소됐다. 중단·완료 기록만 HANDOFF.md에 미커밋으로 남아 있다. 기능 소스·테스트6개 파일의 커밋9c82536은 원격 반영 완료. 추가 빌드·테스트·공개 릴리즈 없음.
+
+## 서버 아이콘·사용자 프로필 이미지 (2026-11-05, 완료)
+
+- 사용자 ‘수정’ 승인으로 Windows/Android 서버 목록에 서버 아이콘, 채팅에 본인·다른 사용자 프로필 이미지를 추가했다. 프로필은 서버 Member.display_avatar 우선, 일반/기본 아바타로 대체한다. 서버별 프로필 URL을 기존 멤버 이름 준비 경로에서 함께 캐시한다.
+- 서버 tuple(id,name)은 유지하고 server_icons 이벤트를 추가했다. Android JSON 서버 row의3번째 필드에 아이콘 URL, 메시지 row에 avatar URL을 추가했다. 서버 정보 변경 시 목록을 재발행한다. URL의 이미지 해시가 달라지면 새 이미지로 로드한다. 프로필은 새 메시지/기록 조회 시 갱신되며 모든 과거 메시지의 즉시 갱신은 보장하지 않는다.
+- desktop_images.py: 작업 스레드4개, URL/크기/모양 키 중복 방지,512개 메모리 PhotoImage 캐시, 실패30초 재시도 제한. 원형 프로필·둥근 서버 이미지. Tk 생성은 UI 스레드에서만 수행하고 현재 표시 이미지 참조를 유지한다. 다운로드는8초/1MB/최대512px 제한.
+- Android DiscordImages.java: 작업 스레드3개,4MB 메모리 LruCache, URL별 요청 합치기, 약한 View 참조·URL 태그로 다른 화면에 잘못 반영 방지. 실패30초 재시도 제한,8초 타임아웃/1MB/512px 제한. Activity 종료 시 정리한다. 이미지가 없거나 실패하면 기존 글자 아이콘을 유지한다. 디스크 캐시는 추가하지 않았다.
+- 실제 공개 Discord CDN 기본 아바타 다운로드·32px 원형 변환 성공. 기본 urllib User-Agent의403을 확인하고 두 플랫폼 모두 앱 이름 User-Agent를 명시했다. 봇 토큰 없이 공개 이미지 요청만 사용한다.
+- 전체 모의 테스트37개 통과, 최종 요청 수정 후 이미지 테스트3개 재확인 통과. 실제 Tk에서 서버 이미지·본인/상대 아바타·편집 상태 유지·대체 아이콘 검증 통과. Python 컴파일·diff 공백 검사 및 graft 갱신 완료. Android 실기기 이미지 표시 및 실제 봇 서버 연결은 미검증.
+- 최종 EXE/APK 빌드 성공. 기본 dist/ChatBot.exe 교체 및 dist/windows-profile-images/ChatBot.exe와 SHA256 일치 확인. 기본/버전 APK 해시 일치. Windows 재실행/새 APK 설치 필요. 버전1.3.0/10300 유지. 실행 앱 종료·커밋·푸시·공개 릴리즈 없음.
+
+## Windows 이미지 미표시 수정 (2026-11-05)
+
+- 사용자 보고: Windows EXE에서 서버·프로필 이미지가 모두 미표시. App.connect가 self.events를 새 Queue로 교체하면서 ImageCache.events는 이전 Queue를 유지한 것이 원인이다. 다운로드 성공 이벤트가 UI poll에 도착하지 않았다. 최초 이미지 검증이 실제 연결 시 큐 교체를 포함하지 못했다.
+- 수정: 연결/재연결 때 이전 이미지 작업 풀을 닫고 새 이벤트 큐로 ImageCache를 재생성하며 서버 아이콘 URL 상태를 초기화한다. 이전 봇 이미지 이벤트와 새 봇 이벤트도 분리된다. Android는 별도 Java 로더여서 이번 버그 영향 없음.
+- tests/test_images.py에 실제 App.connect/재연결을 호출해 다운로드 이벤트가 현재 UI 큐로 전달되는 회귀 테스트 추가. 관련4개 테스트 및 실제 Tk 이미지·편집·대체 아이콘 검증 통과.
+- 저장된 봇 인증은 메모리에서만 사용한 SELECT 성격의 Discord REST GET으로 실제 서버 아이콘3개 다운로드64px 성공 확인. 인증정보와 서버 식별자는 출력·기록하지 않았으며 메시지 전송·서버 변경은 하지 않았다.
+- 단일 ImageProbe.exe에서 실제 App.connect(네트워크 연결 스레드만 모의 처리) 이후 공개 기본 프로필 다운로드→UI 큐→Tk 표시까지 확인: RAW200, CONNECT_QUEUE OK, PHOTOS1/DISPLAYED1/FAILURES0. 진단 EXE 종료 시 Tk 해제 관련 경고가 있었지만 이미지 검증은 통과했다. 실제 봇 gateway 접속은 하지 않았다.
+- dist/windows-image-queue/ChatBot.exe 빌드 성공. 기본 EXE 교체 결과는 후속 기록 참조. 버전1.3.0 유지. Android/APK 변경 없음. 커밋·푸시·공개 릴리즈 없음.
+- 기본 dist/ChatBot.exe 교체 성공, windows-image-queue 보관본과 SHA256 일치 확인. 실행 중 앱 종료 없음. 기본 EXE 재실행 후 봇 연결 필요.
+
+## 1.3.1 커밋·푸시 및 APK 릴리즈 준비 (2026-11-05)
+
+- 사용자 ‘커밋 푸시 릴리즈까지’ 및 후속 ‘apk만 릴리즈’ 승인. 목적지 Axicavlo/DiscordBotChat, 브랜치 codex/dev. 서버·프로필 이미지 및 Windows 연결 큐 수정, 회귀 테스트, 버전1.3.1/10301과 인계 기록을 커밋·푸시한다. v1.3.1 공개 릴리즈는 APK만 올리고 EXE는 로컬 보관한다.
+- 사전 fetch 원격차이0/0, v1.3.1 태그/릴리즈 없음·최신 v1.3.0 확인. 관련 이미지4개 및 실제 Tk 이미지/편집 검증 통과. 이전 전체37개·EXE 공개CDN→연결큐→이미지표시 검증 결과도 유지한다. 최종 버전 변경 EXE/APK 빌드 성공.
+- APK 매니페스트1.3.1/10301 확인. 기존1.3.0과 인증서 SHA256 일치. 기본/버전APK 해시 일치. APK44,373,780 bytes, SHA256 de0c246b74a3ba25f38181dca7dcf310b70a6c3275776c7df9ecbe634c6bd54e. 소스9개파일 토큰패턴 검사0건·APK내 인증파일0건.
+- 릴리즈 스크립트 .build-tools/publish_release_1.3.1.py는 기존 안전한 초안 업로드→해시검증→공개 흐름을 재사용한다. 공개 릴리즈를 덮어쓰지 않으며 Git credential helper 인증을 메모리에서만 사용한다. 노트 .build-tools/release_notes_1.3.1.md. 완료 상태와 소스 SHA는 후속 기록/원격 릴리즈로 확인한다.

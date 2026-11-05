@@ -38,6 +38,17 @@ def message_text(message, names=None):
     return f'{message.created_at.astimezone():%m/%d %H:%M}  {name}\n{body or "[내용 없음]"}\n'
 
 
+def asset_url(asset):
+    return str(asset.with_format('png').with_size(64)) if asset else ''
+
+
+def avatar_url(user, guild=None, avatars=None):
+    key = (getattr(guild, 'id', None), user.id)
+    if avatars and key in avatars:
+        return avatars[key]
+    return asset_url(getattr(user, 'display_avatar', None))
+
+
 class Bridge(discord.Client):
     def __init__(self, events, state_dir=None):
         intents = discord.Intents.default()
@@ -46,6 +57,7 @@ class Bridge(discord.Client):
         self.events = events
         self.worker_loop = None
         self.member_names = {}
+        self.member_avatars = {}
         self._name_expiry = {}
         self._name_tasks = {}
         self._name_slots = asyncio.Semaphore(4)
@@ -64,6 +76,7 @@ class Bridge(discord.Client):
             try:
                 member = await guild.fetch_member(user.id)
                 self.member_names[key] = server_display_name(member, guild)
+                self.member_avatars[key] = avatar_url(member)
                 self._name_expiry[key] = time.monotonic() + 300
             except discord.HTTPException:
                 # A departed member or denied lookup must not break messages.
@@ -82,6 +95,7 @@ class Bridge(discord.Client):
                     key = (guild.id, user.id)
                     if getattr(getattr(user, 'guild', None), 'id', None) == guild.id:
                         self.member_names[key] = server_display_name(user, guild)
+                        self.member_avatars[key] = avatar_url(user)
                         self._name_expiry[key] = time.monotonic() + 300
                     else:
                         participants[key] = (guild, user)
@@ -115,7 +129,11 @@ class Bridge(discord.Client):
         self.events.put(('status', None, '연결 끊김 · 재연결 대기 중'))
 
     async def publish_servers(self):
+        self.events.put(('server_icons', None, {g.id: asset_url(g.icon) for g in self.guilds}))
         self.events.put(('servers', None, sorted([(g.id, g.name) for g in self.guilds], key=lambda x: x[1])))
+
+    async def on_guild_update(self, before, after):
+        await self.publish_servers()
 
     async def on_guild_join(self, guild):
         await self.publish_servers()

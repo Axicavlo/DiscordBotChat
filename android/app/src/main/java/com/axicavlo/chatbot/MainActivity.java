@@ -21,6 +21,7 @@ public class MainActivity extends Activity {
     private enum Page { HOME, CHANNELS, CHAT }
     private Page page = Page.HOME;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final DiscordImages images = new DiscordImages();
     private final Map<String, String> drafts = new HashMap<>();
     private final Map<String, String[]> replies = new HashMap<>();
     private final Map<String, String> serverNames = new HashMap<>(), channelNames = new HashMap<>();
@@ -267,7 +268,13 @@ public class MainActivity extends Activity {
             item.setContentDescription("서버: " + name); item.setTextColor(id.equals(serverId) ? Color.WHITE : INK);
             item.setBackground(rounded(id.equals(serverId) ? ACCENT : Color.rgb(220, 229, 235), 17));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(54)); params.topMargin = dp(8);
-            serverList.addView(item, params); item.setOnClickListener(v -> openServer(id));
+            FrameLayout tile = new FrameLayout(this);
+            tile.addView(item, new FrameLayout.LayoutParams(-1, -1));
+            ImageView icon = new ImageView(this); icon.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            icon.setBackground(rounded(Color.TRANSPARENT, 12)); icon.setClipToOutline(true);
+            FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(dp(42), dp(42), Gravity.CENTER);
+            tile.addView(icon, iconParams); images.load(row.optString(2), icon);
+            serverList.addView(tile, params); item.setOnClickListener(v -> openServer(id));
         }
     }
     private void renderChannels() {
@@ -329,6 +336,16 @@ public class MainActivity extends Activity {
             LinearLayout line = new LinearLayout(this); line.setGravity(Gravity.BOTTOM | (own ? Gravity.RIGHT : Gravity.LEFT));
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2); params.bottomMargin = dp(6);
             messages.addView(line, params);
+            FrameLayout avatar = new FrameLayout(this);
+            TextView initial = label(row.optString("author").substring(0, Math.min(1, row.optString("author").length())), 14);
+            initial.setGravity(Gravity.CENTER); initial.setBackground(rounded(Color.rgb(199,214,222), 16));
+            avatar.addView(initial, new FrameLayout.LayoutParams(-1, -1));
+            ImageView profile = new ImageView(this); profile.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            profile.setBackground(rounded(Color.TRANSPARENT, 16)); profile.setClipToOutline(true);
+            avatar.addView(profile, new FrameLayout.LayoutParams(-1, -1)); images.load(row.optString("avatar"), profile);
+            LinearLayout.LayoutParams avatarParams = new LinearLayout.LayoutParams(dp(32), dp(32));
+            avatarParams.leftMargin = dp(4); avatarParams.rightMargin = dp(4);
+            if (!own) line.addView(avatar, avatarParams);
             LinearLayout meta = column(); meta.setPadding(dp(6), 0, dp(6), dp(2));
             if (row.optBoolean("edited")) { TextView mark = label("편집됨", 10); mark.setTextColor(Color.rgb(138,154,167)); meta.addView(mark); }
             TextView clock = label(row.optString("time"), 10); clock.setTextColor(Color.rgb(138,154,167)); meta.addView(clock);
@@ -349,6 +366,7 @@ public class MainActivity extends Activity {
                 view.setOnLongClickListener(v -> { messageMenu(row); return true; });
             }
             if (!own) line.addView(meta);
+            if (own) line.addView(avatar, avatarParams);
         }
         if (!editExists) clearInlineEdit();
         if (!replyExists) clearReply(); if (atBottom && editId.isEmpty()) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
@@ -495,4 +513,5 @@ public class MainActivity extends Activity {
     }
     @Override protected void onResume() { super.onResume(); lastSnapshot = ""; handler.post(poll); command("refresh", "", "", ""); }
     @Override protected void onPause() { handler.removeCallbacks(poll); saveDraft(); super.onPause(); }
+    @Override protected void onDestroy() { images.close(); super.onDestroy(); }
 }
