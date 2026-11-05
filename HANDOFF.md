@@ -1,6 +1,6 @@
 # 작업 인계 기록
 
-작성일: 2026-11-04 (한국 시간). 다음 세션은 이 문서와 사용자 지침을 먼저 읽고, 실제 Git 상태를 확인한다.
+작성일: 2026-11-05 (한국 시간). 다음 세션은 이 문서와 사용자 지침을 먼저 읽고, 실제 Git 상태를 확인한다.
 
 프로젝트 `AGENTS.md`에 매 작업 시작 시 이 문서를 읽고, 완료·중단 전에 갱신하도록 영구 지침을 추가했다. 이 지침 파일과 인계 문서를 텍스트 선택 개선 커밋에 함께 포함한다.
 
@@ -27,10 +27,10 @@
 - 경로: `C:\Users\itcon\Documents\ChatGPT\봇`
 - 저장소: https://github.com/Axicavlo/DiscordBotChat
 - 브랜치: `codex/dev`
-- 최신 기능 커밋: `516e3d0` — `feat: add animated tournament draws` (origin/codex/dev 푸시 완료). Windows 서버 아이콘 수정은 `c9e69c7`로 함께 푸시했다.
-- 현재 소스·로컬 빌드 버전: `1.3.0`, Android `VERSION_CODE = 10300`. 공개 APK 릴리즈도 1.3.0이다.
-- APK 릴리즈: https://github.com/Axicavlo/DiscordBotChat/releases/tag/v1.3.0
-- APK 다운로드: https://github.com/Axicavlo/DiscordBotChat/releases/download/v1.3.0/ChatBot-1.3.0.apk
+- 최신 기능·릴리즈 소스 커밋: `cef4f94` — `feat: show server icons and user avatars` (origin/codex/dev 푸시 완료). 메시지 편집·삭제는 `9c82536`에 포함된다.
+- 현재 소스·로컬 빌드·공개 APK 버전: `1.3.1`, Android `VERSION_CODE = 10301`.
+- APK 릴리즈: https://github.com/Axicavlo/DiscordBotChat/releases/tag/v1.3.1
+- APK 다운로드: https://github.com/Axicavlo/DiscordBotChat/releases/download/v1.3.1/ChatBot-1.3.1.apk
 - 문서 작성 전 작업 트리는 기존 미추적 파일 `intent-confirmation.png`, `intent-enabled.png`만 있었다. 삭제하거나 무관한 커밋에 포함하지 않는다.
 - 현재 요청 완료: 주작기 토너먼트 구현·커밋·푸시 및 v1.3.0 APK 릴리즈 게시 완료. 릴리즈 소스는 6d138a7이며 아래 최신 기록이 이전 구상보다 우선한다.
 
@@ -444,3 +444,13 @@ Windows PowerShell, 프로젝트 루트 기준:
 - 사전 fetch 원격차이0/0, v1.3.1 태그/릴리즈 없음·최신 v1.3.0 확인. 관련 이미지4개 및 실제 Tk 이미지/편집 검증 통과. 이전 전체37개·EXE 공개CDN→연결큐→이미지표시 검증 결과도 유지한다. 최종 버전 변경 EXE/APK 빌드 성공.
 - APK 매니페스트1.3.1/10301 확인. 기존1.3.0과 인증서 SHA256 일치. 기본/버전APK 해시 일치. APK44,373,780 bytes, SHA256 de0c246b74a3ba25f38181dca7dcf310b70a6c3275776c7df9ecbe634c6bd54e. 소스9개파일 토큰패턴 검사0건·APK내 인증파일0건.
 - 릴리즈 스크립트 .build-tools/publish_release_1.3.1.py는 기존 안전한 초안 업로드→해시검증→공개 흐름을 재사용한다. 공개 릴리즈를 덮어쓰지 않으며 Git credential helper 인증을 메모리에서만 사용한다. 노트 .build-tools/release_notes_1.3.1.md. 완료 상태와 소스 SHA는 후속 기록/원격 릴리즈로 확인한다.
+
+## v1.3.1 APK 릴리즈 완료 (2026-11-05)
+
+- 사용자 요청 순서대로 cef4f948a6f5982d54c22623e7462f6570cbc15d (feat: show server icons and user avatars)를 origin/codex/dev에 커밋·푸시한 뒤 v1.3.1을 최신 공개 릴리즈로 게시했다. 버전1.3.1/10301. 최종 요청대로 첨부는 ChatBot-1.3.1.apk 한 개뿐이며 EXE는 업로드하지 않았다.
+- 릴리즈: https://github.com/Axicavlo/DiscordBotChat/releases/tag/v1.3.1
+- 다운로드: https://github.com/Axicavlo/DiscordBotChat/releases/download/v1.3.1/ChatBot-1.3.1.apk
+- GitHub v1.3.1 태그의 소스 SHA 일치·draft=false·최신 릴리즈 지정·첨부 APK 한 개를 게시 후 별도 조회로 확인했다. 업로드 APK44,373,780bytes, SHA256 de0c246b74a3ba25f38181dca7dcf310b70a6c3275776c7df9ecbe634c6bd54e가 로컬/원격과 일치한다. 기존1.3.0과 서명 인증서도 일치한다.
+- 공개 영수증 .build-tools/release_1.3.1_receipt.json 저장. 인증정보는 메모리에서만 사용했고 파일·출력·커밋에 넣지 않았다. APK는 새 버전 설치 필요. Android 실기기 이미지 표시 검증은 미수행이며 관련 제한은 위 기록 참고.
+- Windows 로컬 dist/windows-1.3.1/ChatBot.exe를 기본 dist/ChatBot.exe로 교체했고 SHA256 일치를 확인했다. 실행 앱 종료 없이 반영했다. 공개 릴리즈에는 포함하지 않았다.
+- 위 준비/승인대기/미완료 기록 중 이 내용과 다른 상태는 이 완료 기록이 우선한다. 완료 인계 문서만 후속 docs 커밋·푸시로 정리한다. 추가 소스 수정·빌드·공개 배포 예정 없음.
