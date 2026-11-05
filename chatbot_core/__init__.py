@@ -21,7 +21,7 @@ def server_display_name(user, guild=None, names=None):
             or getattr(user, 'display_name', None) or getattr(user, 'name', None) or '알 수 없는 사용자')
 
 
-def message_text(message, names=None):
+def message_text(message, names=None, include_extras=True):
     body = message.clean_content
     if message.reference:
         original = message.reference.resolved
@@ -30,12 +30,21 @@ def message_text(message, names=None):
             body = f'↳ {server_display_name(original.author, original.guild, names)}: {preview}\n{body}'
         else:
             body = f'↳ 원본 메시지 (ID: {message.reference.message_id})\n{body}'
-    extras = [a.url for a in message.attachments]
-    extras += [e.title or e.description or '[임베드]' for e in message.embeds]
+    extras = [a.url for a in message.attachments] if include_extras else []
+    if include_extras:
+        extras += [e.title or e.description or '[임베드]' for e in message.embeds]
     if extras:
         body += '\n' + '\n'.join(extras)
     name = server_display_name(message.author, getattr(message, 'guild', None), names)
     return f'{message.created_at.astimezone():%m/%d %H:%M}  {name}\n{body or "[내용 없음]"}\n'
+
+
+def message_view(message, names=None, visible=False):
+    from .media import message_media
+    body = message_text(message, names, include_extras=False).split('\n', 1)[1].rstrip('\n')
+    if not message.clean_content and not message.reference:
+        body = ''
+    return message_media(message, body, visible)
 
 
 def asset_url(asset):

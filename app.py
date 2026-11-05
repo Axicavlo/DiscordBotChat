@@ -13,8 +13,9 @@ from tkinter import font as tkfont
 
 import discord
 
+from chatbot_core.media import preview_layout
 from desktop_images import ImageCache
-from chatbot_core import avatar_url, Bridge, message_text, safe_error, server_display_name, VERSION
+from chatbot_core import message_view, avatar_url, Bridge, message_text, safe_error, server_display_name, VERSION
 if os.name == 'nt':
     from windows_ime import attach_preview
 
@@ -109,6 +110,13 @@ class Chat:
         self.mention_dismissed = None
         self.bg = '#e9eef3'
         self.resize_job = None
+        self.animation_job = None
+        self.animated_items = []
+        self.animation_refs = {}
+        self.follow_tail = True
+        self.message_positions = {}
+        self.media_requests = []
+        self.media_load_job = None
         self.send_job = None
         self.mention_job = None
         self.message_menu_frame = None
@@ -129,13 +137,13 @@ class Chat:
         self.message_area.pack(fill='both', expand=True, padx=8)
         self.view = tk.Canvas(self.message_area, bg=self.bg, highlightthickness=0)
         self.scrollbar = ttk.Scrollbar(self.message_area, orient='vertical',
-                                       command=self.view.yview, style='Chat.Vertical.TScrollbar')
+                                       command=self.scroll_messages, style='Chat.Vertical.TScrollbar')
         self.scrollbar.pack(side='right', fill='y', padx=(4, 0), pady=3)
-        self.view.configure(yscrollcommand=self.scrollbar.set)
+        self.view.configure(yscrollcommand=self.message_scrolled)
         self.view.configure(selectbackground='#bcecf2', selectforeground='#243746', selectborderwidth=0)
         self.view.pack(side='left', fill='both', expand=True)
         self.view.bind('<Configure>', self.schedule_render)
-        self.view.bind('<MouseWheel>', lambda event: self.view.yview_scroll(-int(event.delta / 120), 'units'))
+        self.view.bind('<MouseWheel>', self.wheel_messages)
         self.view.bind('<Button-1>', self.start_message_selection)
         self.view.bind('<B1-Motion>', self.drag_message_selection)
         self.view.bind('<ButtonRelease-1>', self.finish_message_selection)
@@ -232,12 +240,53 @@ class Chat:
         if self.mention_rows:
             self.window.after_idle(self.position_mentions)
 
+    def scroll_messages(self, *args):
+        if args[0] == 'scroll' and int(args[1]) < 0:
+            self.follow_tail = False
+        elif args[0] == 'moveto' and float(args[1]) < self.view.yview()[0]:
+            self.follow_tail = False
+        self.view.yview(*args)
+        if self.view.yview()[1] >= .999999:
+            self.follow_tail = True
+
+    def wheel_messages(self, event):
+        steps = -int(event.delta / 120)
+        if not steps and event.delta:
+            steps = -1 if event.delta > 0 else 1
+        if steps:
+            self.scroll_messages('scroll', steps, 'units')
+        return 'break'
+
+    def message_scrolled(self, first, last):
+        self.scrollbar.set(first, last)
+        if self.app.show_media and self.media_load_job is None:
+            self.media_load_job = self.window.after(40, self.load_visible_media)
+
+    def load_visible_media(self):
+        self.media_load_job = None
+        if not self.app.show_media:
+            return
+        top = self.view.canvasy(0)
+        height = max(600, self.view.winfo_height())
+        for request in self.media_requests:
+            if top-height <= request['y'] <= top+height*2:
+                photo = self.app.images.get(*request['key'], candidates=request['alternatives'])
+                if photo and not request['displayed']:
+                    request['displayed'] = True
+                    self.schedule_render()
+
     def schedule_render(self, event=None):
         if self.resize_job:
             self.window.after_cancel(self.resize_job)
         self.resize_job = self.window.after(80, self.render)
 
     def close(self):
+        if self.media_load_job:
+            self.window.after_cancel(self.media_load_job)
+            self.media_load_job = None
+        if self.animation_job:
+            self.window.after_cancel(self.animation_job)
+            self.animation_job = None
         self.hide_message_menu()
         self.cancel_edit(render=False)
         complete_ime(self.input)
@@ -257,10 +306,34 @@ class Chat:
             self.app.active_chat = None
             self.app.show_empty()
 
+    def animate_media(self):
+        self.animation_job = None
+        if not self.app.show_media or not self.window.winfo_ismapped():
+            return
+        top = self.view.canvasy(0)
+        bottom = top + self.view.winfo_height()
+        for key, item in self.animated_items:
+            box = self.view.bbox(item)
+            if box and box[3] >= top and box[1] <= bottom:
+                photo = self.app.images.current(key)
+                if photo:
+                    self.view.itemconfigure(item, image=photo)
+                    self.animation_refs[item] = photo
+        if self.animated_items:
+            self.animation_job = self.window.after(20, self.animate_media)
+
     def render(self):
         self.resize_job = None
-        bottom = self.view.yview()[1] >= .98
-        position = self.view.yview()[0]
+        if self.animation_job:
+            self.window.after_cancel(self.animation_job)
+            self.animation_job = None
+        self.animated_items = []
+        self.animation_refs = {}
+        bottom = self.follow_tail and self.view.yview()[1] >= .999999
+        top = self.view.canvasy(0)
+        anchor = next(((mid, top-start) for mid, (start, end) in self.message_positions.items() if end > top), None)
+        self.message_positions = {}
+        self.media_requests = []
         if not self.selection_dragging and not self.view.select_item():
             self.clear_message_selection()
         self.view.delete('all')
@@ -280,6 +353,7 @@ class Chat:
                 self.view.create_text(width/2, y+12, text=f'{local:%Y년 %m월 %d일}', fill='#6f7f8c', font=('맑은 고딕', 9))
                 y += 45
                 last_date = local.date()
+            row_start = y
             own = me is not None and message.author.id == me.id
             tag = f'message_{message.id}'
             avatar_x = width - 42 if own else 10
@@ -302,28 +376,64 @@ class Chat:
                 x = width - bw - 52 if own else 52
                 self.view.create_window(x, y, anchor='nw', window=self.edit_frame, width=bw)
                 y += bh + 16
+                self.message_positions[message.id] = (row_start, y)
                 continue
-            body = message_text(message, getattr(self.app.bridge, 'member_names', None)).split('\n', 1)[1].rstrip('\n')
+            presentation = message_view(message, getattr(self.app.bridge, 'member_names', None), self.app.show_media)
+            body = presentation['text']
+            previews = presentation['media']
+            max_preview = min(320, int(width*.52))
+            def cached_size(key):
+                photo = self.app.images.photos.get(key)
+                return (photo.width(), photo.height()) if photo else None
+            media_layout, media_width, media_height = preview_layout(previews, max_preview, cached_size)
             text_id = self.view.create_text(0,0,text=body,anchor='nw',width=max(150,int(width*.64)),font=('맑은 고딕',10),fill='white' if own else '#314b5c',tags=tag)
             box = self.view.bbox(text_id)
-            bw, bh = box[2]-box[0]+26, box[3]-box[1]+20
+            text_height = box[3]-box[1] if body else 0
+            bw = max((box[2]-box[0]+26) if body else 26, media_width+26)
+            bh = text_height+20 + (media_height+8 if media_layout and body else media_height)
             x = width-bw-52 if own else 52
             bubble = self.rounded(self.view,x,y,x+bw,y+bh,'#00a6bd' if own else 'white',tags=tag)
             self.view.tag_lower(bubble,text_id)
             self.view.coords(text_id,x+13,y+10)
             self.message_text_items[message.id] = (text_id, body)
+            media_y = y + text_height + (18 if body else 10)
+            viewport_top = self.view.canvasy(0)
+            viewport_height = max(600, self.view.winfo_height())
+            for entry in media_layout:
+                item, key = entry['item'], entry['key']
+                px, py = x+13+entry['x'], media_y+entry['y']
+                near_view = viewport_top - viewport_height <= py <= viewport_top + viewport_height * 2
+                photo = self.app.images.get(*key, candidates=item.get('alternatives')) if near_view else None
+                self.media_requests.append(dict(key=key, y=py, alternatives=item.get('alternatives'), displayed=bool(photo)))
+                if photo:
+                    self.avatar_photos.append(photo)
+                    photo = self.app.images.current(key) or photo
+                    image_item = self.view.create_image(px, py, image=photo, anchor='nw', tags=tag)
+                    if key in self.app.images.animations:
+                        self.animated_items.append((key, image_item))
+                        self.animation_refs[image_item] = photo
+                else:
+                    self.view.create_text(px, py+entry['height']/2, anchor='w', width=entry['width'],
+                                          text='['+item['label']+']', fill='white' if own else '#718493',
+                                          font=('맑은 고딕', 9), tags=tag)
             self.view.create_text(x-8 if own else x+bw+8,y+bh-3,text=f'{local:%H:%M}',anchor='se' if own else 'sw',fill='#8a9aa7',font=('맑은 고딕',8),tags=tag)
             if getattr(message, 'edited_at', None):
                 self.view.create_text(x-8 if own else x+bw+8, y+bh-19, text='편집됨',
                                       anchor='se' if own else 'sw', fill='#8a9aa7', font=('맑은 고딕', 8), tags=tag)
             self.view.tag_bind(tag,'<Button-3>',lambda event, mid=message.id: self.message_menu(event,mid))
             y += bh+16
+            self.message_positions[message.id] = (row_start, y)
         self.view.configure(scrollregion=(0,0,width,y+12))
+        if self.animated_items:
+            self.animation_job = self.window.after(20, self.animate_media)
         self.restore_message_selection()
         if bottom:
             self.view.yview_moveto(1)
         else:
-            self.view.yview_moveto(position)
+            if anchor and anchor[0] in self.message_positions:
+                start, end = self.message_positions[anchor[0]]
+                top = start + min(anchor[1], end-start-1)
+            self.view.yview_moveto(max(0, top) / max(1, y+12))
 
     def message_menu(self, event, mid):
         if mid not in self.messages:
@@ -770,6 +880,7 @@ class App:
         root.protocol('WM_DELETE_WINDOW', self.close)
         self.events = queue.Queue()
         self.images = ImageCache(self.events)
+        self.show_media = False
         self.server_icons = {}
         self.server_photos = []
         self.bridge = None
@@ -893,7 +1004,17 @@ class App:
         self.connection_footer = tk.Frame(self.sidebar.content, bg='#f2f6f9')
         self.connection_footer.pack(fill='x')
         tk.Frame(self.connection_footer, bg='#dce4eb', height=1).pack(fill='x')
-        tk.Label(self.connection_footer, textvariable=self.status, bg='#f2f6f9', fg='#718493', wraplength=230, font=('맑은 고딕', 8), justify='left', anchor='w').pack(fill='x', padx=16, pady=16)
+        footer_row = tk.Frame(self.connection_footer, bg='#f2f6f9')
+        footer_row.pack(fill='x', padx=12, pady=12)
+        tk.Label(footer_row, textvariable=self.status, bg='#f2f6f9', fg='#718493', wraplength=160,
+                 font=('맑은 고딕', 8), justify='left', anchor='w').pack(side='left', fill='x', expand=True)
+        tk.Label(footer_row, text='이미지', bg='#f2f6f9', fg='#718493', font=('맑은 고딕', 8)).pack(side='left', padx=(4, 5))
+        self.media_switch = tk.Canvas(footer_row, width=34, height=20, bg='#f2f6f9', highlightthickness=0, cursor='hand2', takefocus=True)
+        self.media_switch.pack(side='right')
+        self.media_switch.bind('<Button-1>', self.toggle_media)
+        self.media_switch.bind('<space>', self.toggle_media)
+        self.media_switch.bind('<Return>', self.toggle_media)
+        self.draw_media_switch()
         self.chat_host = tk.Frame(self.workspace, bg='#e9eef3')
         self.chat_host.pack(side='left', fill='both', expand=True, padx=8, pady=8)
         self.empty = tk.Frame(self.chat_host, bg='#e9eef3')
@@ -905,6 +1026,31 @@ class App:
         self.show_empty()
         self.show_home()
         root.after(100, self.poll)
+
+    def draw_media_switch(self):
+        from PIL import Image, ImageDraw, ImageTk
+        canvas = self.media_switch
+        if not hasattr(self, 'media_switch_images'):
+            self.media_switch_images = {}
+            scale = 6
+            for enabled in (False, True):
+                image = Image.new('RGB', (34*scale, 20*scale), canvas.cget('bg'))
+                draw = ImageDraw.Draw(image)
+                color = '#00a6bd' if enabled else '#b8c8d2'
+                draw.rounded_rectangle((scale, scale, 33*scale, 19*scale), radius=9*scale, fill=color)
+                x = 19 if enabled else 3
+                draw.ellipse((x*scale, 4*scale, (x+12)*scale, 16*scale), fill='white')
+                image = image.resize((34, 20), Image.Resampling.LANCZOS)
+                self.media_switch_images[enabled] = ImageTk.PhotoImage(image, master=canvas)
+        canvas.delete('all')
+        canvas.create_image(0, 0, anchor='nw', image=self.media_switch_images[self.show_media])
+
+    def toggle_media(self, event=None):
+        self.show_media = not self.show_media
+        self.draw_media_switch()
+        for chat in self.chats.values():
+            chat.schedule_render()
+        return 'break'
 
     def connect(self):
         token = self.token.get().strip()
