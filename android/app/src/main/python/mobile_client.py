@@ -10,7 +10,7 @@ import certifi
 # Set before importing aiohttp so certificate verification remains enabled.
 os.environ['SSL_CERT_FILE'] = certifi.where()
 
-from chatbot_core import Bridge, message_text, server_display_name, VERSION
+from chatbot_core import avatar_url, Bridge, message_text, server_display_name, VERSION
 
 
 class MobileClient:
@@ -21,6 +21,7 @@ class MobileClient:
         self.state = dict(version=VERSION, connected=False, busy=False,
                           status='봇 토큰을 입력하세요.', servers=[], channels=[],
                           server_id='', channel_id='', messages=[], sent=0)
+        self.server_icons = {}
         self.messages = {}
         self.deleted = set()
 
@@ -95,6 +96,7 @@ class MobileClient:
         return dict(id=str(message.id), author_id=str(message.author.id),
                     author=server_display_name(message.author, getattr(message, 'guild', None), names),
                     text=message_text(message, names), content=message.content, edited=bool(message.edited_at),
+                    avatar=avatar_url(message.author, getattr(message, 'guild', None), getattr(self.bridge, 'member_avatars', None)),
                     time=message.created_at.astimezone().strftime("%H:%M"),
                     own=bool(self.bridge.user and message.author.id == self.bridge.user.id))
 
@@ -113,8 +115,11 @@ class MobileClient:
                 self.state.update(connected=False, status=data)
             elif kind == 'error':
                 self.state['status'] = data
+            elif kind == 'server_icons':
+                self.server_icons = data
+                self.state['servers'] = [[row[0], row[1], data.get(int(row[0]), '')] for row in self.state['servers']]
             elif kind == 'servers':
-                self.state['servers'] = [[str(i), name] for i, name in data]
+                self.state['servers'] = [[str(i), name, self.server_icons.get(i, '')] for i, name in data]
                 if self.state['server_id'] and self.state['server_id'] not in {str(i) for i, _ in data}:
                     self.state.update(server_id='', channel_id='', channels=[], messages=[])
                     self.messages.clear()
