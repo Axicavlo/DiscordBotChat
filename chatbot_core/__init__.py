@@ -5,6 +5,7 @@ import discord
 
 from .version import VERSION
 from .tournament_discord import TournamentService
+from .number_baseball import NumberBaseballService
 
 
 def server_display_name(user, guild=None, names=None):
@@ -71,11 +72,13 @@ class Bridge(discord.Client):
         self._name_tasks = {}
         self._name_slots = asyncio.Semaphore(4)
         self.tournaments = TournamentService(self, state_dir)
+        self.number_baseball = NumberBaseballService(self.tournaments.tree)
 
     async def setup_hook(self):
         await self.tournaments.setup()
 
     async def close(self):
+        await self.number_baseball.close()
         await self.tournaments.close()
         await super().close()
 
@@ -218,9 +221,11 @@ class Bridge(discord.Client):
             pass
 
     async def on_raw_message_delete(self, payload):
+        self.number_baseball.message_deleted(payload.channel_id, (payload.message_id,))
         self.events.put(('deleted', payload.channel_id, payload.message_id))
 
     async def on_raw_bulk_message_delete(self, payload):
+        self.number_baseball.message_deleted(payload.channel_id, payload.message_ids)
         for mid in payload.message_ids:
             self.events.put(('deleted', payload.channel_id, mid))
 

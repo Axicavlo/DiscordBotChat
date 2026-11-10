@@ -100,9 +100,14 @@ class TournamentService:
 
     async def help(self, interaction: discord.Interaction):
         embed = discord.Embed(title='펩시봇 명령어', colour=0x00A6BD)
-        embed.description = '\n\n'.join(f'**/{command.qualified_name}**\n{command.description}'
-                                          for command in self.tree.walk_commands()
-                                          if isinstance(command, app_commands.Command))
+        entries = []
+        for command in self.tree.walk_commands():
+            if isinstance(command, app_commands.Command):
+                name = command.qualified_name
+                if name == '숫자야구':
+                    name += ' 중복가능:y/n'
+                entries.append(f'**/{name}**\n{command.description}')
+        embed.description = '\n\n'.join(entries)
         await interaction.response.send_message(embed=embed, ephemeral=True,
                                                 allowed_mentions=discord.AllowedMentions.none())
 
