@@ -105,7 +105,10 @@ class GameView(discord.ui.View):
     @discord.ui.button(label='숫자 입력', style=discord.ButtonStyle.primary, custom_id='number-baseball:guess')
     async def guess(self, interaction, button):
         player = self.room.players.get(interaction.user.id)
-        if not self.room.active or not self.room.answer or not player or player.result:
+        if player is None:
+            await interaction.response.send_message('이 방에 참가한 사람만 숫자를 입력할 수 있습니다.', ephemeral=True)
+            return
+        if not self.room.active or not self.room.answer or player.result:
             await interaction.response.send_message('현재 숫자를 입력할 수 없습니다.', ephemeral=True)
             return
         await interaction.response.send_modal(

@@ -183,3 +183,18 @@ class NumberBaseballTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('????', edited['embed'].description)
         self.assertIsNone(edited['view'])
         self.assertFalse(room.active)
+
+    async def test_public_guess_button_only_opens_for_participants(self):
+        await self.service.create(self.owner)
+        room = self.service.rooms[10]
+        await room.view.start.callback(self.owner)
+
+        await room.view.guess.callback(self.guest)
+        self.guest.response.send_message.assert_awaited_once_with(
+            '이 방에 참가한 사람만 숫자를 입력할 수 있습니다.', ephemeral=True
+        )
+        self.guest.response.send_modal.assert_not_awaited()
+        self.assertNotIn(self.guest.user.id, room.players)
+
+        await room.view.guess.callback(self.owner)
+        self.owner.response.send_modal.assert_awaited_once()
